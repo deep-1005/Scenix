@@ -1,0 +1,42 @@
+:root { --navy:#1a2b4a; --blue:#2e6fb0; --green:#2e7d52; --red:#b23a48; --gray:#6b7280; --lgray:#f2f4f7; }
+* { box-sizing: border-box; }
+body { margin:0; background:#eef1f6; font-family: system-ui, sans-serif; color:#1a1a1a; }
+.app { max-width:860px; margin:0 auto; padding:32px 20px 60px; }
+header h1 { color:var(--navy); margin:0; font-size:28px; }
+header .sub { color:var(--gray); margin:4px 0 24px; }
+.card { background:#fff; border-radius:12px; padding:24px; margin-bottom:20px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+.card h2 { margin:0 0 16px; font-size:18px; color:var(--navy); }
+.text-input { width:100%; padding:12px; border:1px solid #d0d7e2; border-radius:8px; font-size:15px; margin-bottom:14px; }
+.dropzone { border:2px dashed #c2cdde; border-radius:10px; padding:36px; text-align:center; color:var(--gray); cursor:pointer; transition:.15s; margin-bottom:16px; }
+.dropzone.over { border-color:var(--blue); background:#f4f8fd; }
+.primary { background:var(--blue); color:#fff; border:none; padding:12px 24px; border-radius:8px; font-size:15px; font-weight:600; cursor:pointer; }
+.primary:disabled { background:#b9c4d4; cursor:not-allowed; }
+.progress-bar { height:12px; background:var(--lgray); border-radius:6px; overflow:hidden; }
+.progress-fill { height:100%; background:var(--blue); transition:width .4s ease; }
+.stage { margin:12px 0 16px; color:var(--navy); font-size:14px; }
+.err { color:var(--red); }
+.muted { color:var(--gray); font-size:14px; margin:8px 0; }
+table { width:100%; border-collapse:collapse; }
+td { padding:10px 8px; border-bottom:1px solid #eef1f6; cursor:pointer; font-size:14px; }
+tr:hover td { background:#f8fafc; }
+.badge { padding:3px 10px; border-radius:12px; font-size:12px; font-weight:600; }
+.badge.done { background:#e3f3ea; color:var(--green); }
+.badge.running { background:#e6f0fa; color:var(--blue); }
+.badge.queued { background:#fdf3e0; color:#b5851f; }
+.badge.failed { background:#fbe9ea; color:var(--red); }
+
+/* Tabs */
+.tabs { display:flex; gap:8px; margin:8px 0 16px; border-bottom:1px solid #eef1f6; }
+.tabs button { background:none; border:none; padding:8px 14px; cursor:pointer; font-size:14px; color:var(--gray); border-bottom:2px solid transparent; }
+.tabs button.on { color:var(--navy); border-bottom-color:var(--blue); font-weight:600; }
+
+/* Cubemap gallery */
+.gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; }
+.thumb { border:1px solid #e5e9f0; border-radius:8px; overflow:hidden; background:#fafbfc; }
+.thumb img { width:100%; height:100px; object-fit:cover; display:block; }
+.thumb span { display:block; font-size:11px; color:var(--gray); padding:4px 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* 3D viewer */
+.viewer { width:100%; height:460px; border-radius:10px; overflow:hidden; background:#0d1320; }
+.download { display:inline-block; margin-top:12px; color:var(--blue); font-size:14px; font-weight:600; text-decoration:none; }
+.download:hover { text-decoration:underline; }

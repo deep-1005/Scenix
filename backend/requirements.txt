@@ -1,0 +1,13 @@
+fastapi[standard]
+uvicorn
+celery
+redis
+sqlalchemy
+psycopg2-binary
+pydantic-settings
+python-multipart
+py360convert
+opencv-python
+pillow
+numpy
+pycolmap

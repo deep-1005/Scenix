@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Generated outputs
+backend/storage/
+storage/
+
+# Databases
+*.db
+
+# Point clouds
+*.ply
+
+# Models
+*.pth
+*.pt
+*.ckpt
+
+# Build
+build/
+dist/
