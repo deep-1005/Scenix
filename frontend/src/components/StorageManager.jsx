@@ -1,21 +1,23 @@
 // StorageManager.jsx
 // Shows all jobs organized by scene name with storage usage and delete buttons
-// Usage: <StorageManager onSelectJob={(job) => ...} />
+// Logic is unchanged from the original — only styling/markup updated to match the dark theme.
 
 import { useState, useEffect } from "react";
-
-const API = "http://localhost:8000";
+import { API } from "../api";
 
 function fmt(mb) {
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
   return `${mb} MB`;
 }
 
-function statusColor(s) {
+function statusBadgeClass(s) {
   return {
-    done: "#2e7d32", failed: "#c62828", running: "#1a73e8",
-    queued: "#e65100", complete: "#2e7d32",
-  }[s] || "#666";
+    done: "badge done",
+    complete: "badge complete",
+    failed: "badge failed",
+    running: "badge running",
+    queued: "badge pending",
+  }[s] || "badge pending";
 }
 
 export default function StorageManager({ onSelectJob }) {
@@ -30,7 +32,7 @@ export default function StorageManager({ onSelectJob }) {
     try {
       const res = await fetch(`${API}/storage/summary`);
       setJobs(await res.json());
-    } catch {}
+    } catch { }
     setLoading(false);
   }
 
@@ -56,76 +58,57 @@ export default function StorageManager({ onSelectJob }) {
 
   const totalMb = jobs.reduce((s, j) => s + j.upload_mb + j.output_mb, 0);
 
-  if (loading) return <p className="muted">Loading storage info…</p>;
+  if (loading) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 0", color: "var(--text-secondary)", fontSize: 12 }}>
+        <div className="spinner" />
+        Loading storage info…
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div style={{
-        display: "flex", justifyContent: "space-between",
-        alignItems: "center", marginBottom: 12,
-      }}>
-        <span style={{ fontSize: 12, color: "#888" }}>
+    <div className="storage-manager">
+      <div className="storage-toolbar">
+        <span className="storage-total">
           Total used: <strong>{fmt(totalMb)}</strong>
         </span>
-        <button onClick={load} style={{
-          background: "transparent", border: "1px solid #ddd",
-          borderRadius: 6, padding: "4px 12px", fontSize: 12,
-          cursor: "pointer", color: "#666",
-        }}>↻ Refresh</button>
+        <button className="btn btn-ghost" onClick={load}>↻ Refresh</button>
       </div>
 
       {Object.entries(grouped).map(([sceneName, sceneJobs]) => (
-        <div key={sceneName} style={{
-          border: "1px solid #e0e0e0", borderRadius: 8,
-          marginBottom: 12, overflow: "hidden",
-        }}>
-          <div style={{
-            background: "#f8f8f8", padding: "8px 14px",
-            borderBottom: "1px solid #e0e0e0",
-            display: "flex", alignItems: "center", gap: 8,
-          }}>
-            <span style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>{sceneName}</span>
-            <span style={{ fontSize: 11, color: "#888" }}>
+        <div key={sceneName} className="storage-group">
+          <div className="storage-group-header">
+            <span className="storage-group-name">{sceneName}</span>
+            <span className="storage-group-count">
               {sceneJobs.length} run{sceneJobs.length > 1 ? "s" : ""}
             </span>
           </div>
 
           {sceneJobs.map(j => (
-            <div key={j.job_id} style={{
-              display: "flex", alignItems: "center", gap: 8,
-              padding: "8px 14px", borderBottom: "1px solid #f0f0f0",
-              fontSize: 12,
-            }}>
-              <span style={{
-                color: statusColor(j.status), fontWeight: 600,
-                minWidth: 60,
-              }}>{j.status}</span>
+            <div key={j.job_id} className="storage-row">
+              <span className={statusBadgeClass(j.status)}>{j.status}</span>
 
-              <span style={{ color: "#888", flex: 1 }}>
+              <span className="storage-row-date">
                 {j.created_at ? new Date(j.created_at).toLocaleString() : "—"}
               </span>
 
-              <span style={{ color: "#888", minWidth: 90, textAlign: "right" }}>
+              <span className="storage-row-size">
                 ↑{fmt(j.upload_mb)} / ↓{fmt(j.output_mb)}
               </span>
 
               <button
+                className="btn btn-ghost btn-sm"
                 onClick={() => onSelectJob && onSelectJob(j.job_id)}
-                style={{
-                  background: "transparent", color: "#7c6af7",
-                  border: "1px solid #7c6af7", borderRadius: 5,
-                  padding: "3px 10px", fontSize: 11, cursor: "pointer",
-                }}>View</button>
+              >
+                View
+              </button>
 
               <button
+                className="btn btn-danger-ghost btn-sm"
                 onClick={() => handleDelete(j.job_id, sceneName)}
                 disabled={deleting === j.job_id}
-                style={{
-                  background: "transparent", color: "#c62828",
-                  border: "1px solid #c62828", borderRadius: 5,
-                  padding: "3px 10px", fontSize: 11, cursor: "pointer",
-                  opacity: deleting === j.job_id ? 0.5 : 1,
-                }}>
+              >
                 {deleting === j.job_id ? "…" : "Delete"}
               </button>
             </div>

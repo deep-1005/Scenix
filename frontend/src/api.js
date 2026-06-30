@@ -18,3 +18,5 @@ export function plyUrl(id)      { return `${API}/jobs/${id}/ply`; }
 
 // Gaussian Splat .ply (the FastGS output)
 export function splatPlyUrl(id) { return `${API}/jobs/${id}/splat`; }
+
+export async function resumeJob(id) { return (await axios.post(`${API}/jobs/${id}/resume`)).data; }
