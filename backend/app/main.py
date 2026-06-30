@@ -10,7 +10,10 @@ from app.models.db import SessionLocal, Job, init_db
 from app.workers.tasks import run_pipeline
 from app.core.config import settings
 from app.pipeline.fastgs import run_fastgs
+from starlette.middleware.cors import CORSMiddleware as StarletteCORSMiddleware
+from starlette.applications import Starlette
 
+# ── App setup (this was missing — `app` must exist before any @app.* decorator) ──
 app = FastAPI(title="Forensic Digital Twin API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
@@ -27,9 +30,23 @@ def startup():
     init_db()
     os.makedirs(settings.storage_uploads, exist_ok=True)
     os.makedirs(settings.storage_outputs, exist_ok=True)
-    app.mount("/files",
-              StaticFiles(directory=settings.storage_outputs),
-              name="files")
+
+    # CORS fix: StaticFiles mounted directly doesn't reliably inherit the
+    # parent app's CORSMiddleware in all FastAPI/Starlette version combos.
+    # <img> tags work regardless (no CORS needed for image element loads),
+    # but fetch() calls — like the "Download all" zip feature — strictly
+    # require Access-Control-Allow-Origin on the response, which the plain
+    # mount wasn't sending. Wrapping it in its own Starlette app with its
+    # own CORS middleware guarantees the header is always present.
+    files_app = Starlette()
+    files_app.add_middleware(
+        StarletteCORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "HEAD", "OPTIONS"],
+        allow_headers=["*"],
+    )
+    files_app.mount("/", StaticFiles(directory=settings.storage_outputs), name="static")
+    app.mount("/files", files_app, name="files")
 
 def _job_dict(job: Job) -> dict:
     try:
@@ -47,15 +64,12 @@ def _find_splat_ply(job_id: str) -> str | None:
     """Find the FastGS output PLY — checks multiple possible locations."""
     base = settings.storage_outputs
     candidates = [
-        # Primary: what tasks.py saves via _find_splat_ply
         os.path.join(base, job_id, "gaussian_output", "point_cloud",
                      f"iteration_{30000}", "point_cloud.ply"),
-        # Fallback: any iteration
     ]
     for p in candidates:
         if os.path.exists(p):
             return p
-    # Search all iterations
     pc_dir = os.path.join(base, job_id, "gaussian_output", "point_cloud")
     if os.path.isdir(pc_dir):
         best_iter, best_path = -1, None
@@ -98,6 +112,21 @@ def get_job(job_id: str):
     if not job:
         raise HTTPException(404, "job not found")
     return _job_dict(job)
+
+@app.post("/jobs/{job_id}/resume")
+def resume_job(job_id: str):
+    db = SessionLocal()
+    job = db.query(Job).get(job_id)
+    if not job:
+        db.close()
+        raise HTTPException(404, "job not found")
+    if job.status != "failed":
+        db.close()
+        raise HTTPException(400, f"Can only resume failed jobs (current status: {job.status})")
+    from_stage = job.stage
+    db.close()
+    run_pipeline.delay(job_id, resume=True)
+    return {"status": "resuming", "job_id": job_id, "from_stage": from_stage}
 
 @app.get("/jobs")
 def list_jobs():
@@ -145,7 +174,6 @@ def list_cubemaps(job_id: str):
             pitch = m.group("pitch")
             face = f"yaw{yaw}_pitch{pitch}"
         else:
-            # Flat passthrough image (not a panorama-derived view)
             source = os.path.splitext(fname)[0]
             face = "original"
         cubemaps.append({

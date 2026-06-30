@@ -3,6 +3,7 @@ import { createJob, getJob, listJobs, plyUrl, splatPlyUrl, resumeJob, API } from
 import CubemapGallery from "./components/CubemapGallery";
 import PointCloudViewer from "./components/PointCloudViewer";
 import SplatViewer from "./components/SplatViewer";
+import RealSplatViewer from "./components/RealSplatViewer";
 import GaussianSplatSection from "./components/GaussianSplatViewer";
 import StorageManager from "./components/StorageManager";
 import Toast from "./components/Toast";
@@ -359,10 +360,12 @@ export default function App() {
               })}
             </div>
 
+            {/* ── Tabs: Cubemaps / Point cloud / Gaussian splat (points) / Splat viewer (full render) ── */}
             <div className="tabs">
               <button className={tab === "cubemaps" ? "on" : ""} onClick={() => setTab("cubemaps")}>Cubemaps</button>
               <button className={tab === "pointcloud" ? "on" : ""} onClick={() => setTab("pointcloud")}>Point cloud</button>
               <button className={tab === "splat" ? "on" : ""} onClick={() => setTab("splat")}>Gaussian splat</button>
+              <button className={tab === "splatviewer" ? "on" : ""} onClick={() => setTab("splatviewer")}>Splat viewer</button>
             </div>
 
             <div className="tab-content">
@@ -420,6 +423,27 @@ export default function App() {
                     </div>
                   ) : (
                     <p className="muted">Gaussian splat appears after training completes.</p>
+                  )}
+                </>
+              )}
+
+              {/* ── New tab: full splat-quality render (ellipsoids, color, opacity) ── */}
+              {tab === "splatviewer" && (
+                <>
+                  {gaussianDone ? (
+                    <>
+                      <RealSplatViewer jobId={activeJob.job_id} />
+                      <a className="download-btn" href={splatPlyUrl(activeJob.job_id)} download>
+                        ↓ Download Gaussian splat (.ply)
+                      </a>
+                    </>
+                  ) : gaussianRunning ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--text-secondary)", fontSize: 12 }}>
+                      <div className="spinner" />
+                      <span>Training Gaussian Splat — {activeJob.progress || 0}% — viewer will load once training finishes…</span>
+                    </div>
+                  ) : (
+                    <p className="muted">Full splat viewer appears once Gaussian Splat training completes.</p>
                   )}
                 </>
               )}
