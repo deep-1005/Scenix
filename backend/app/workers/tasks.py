@@ -28,12 +28,12 @@ FASTGS_ENV = {
     ),
 }
 
-# Hard time limit for the cleaning subprocess. If Open3D hangs or the OS
-# OOM-kills it, this guarantees the pipeline fails loudly with a clear
-# error instead of silently taking the whole Celery worker down with it.
 CLEANING_TIMEOUT_SECONDS = 600  # 10 minutes
 
 STUB_STAGES = ["cleanup", "mesh", "detection", "classify", "measure", "report"]
+
+# Order matters — used to decide what to skip on resume.
+STAGE_ORDER = ["cubemaps", "colmap", "cleaning", "gaussian_splat"]
 
 
 def _set(db, job, status=None, stage=None, progress=None, error=None, log_tail=None):
@@ -43,6 +43,51 @@ def _set(db, job, status=None, stage=None, progress=None, error=None, log_tail=N
     if error is not None:    job.error = error
     if log_tail is not None: job.log_tail = log_tail
     db.commit()
+
+
+# ── Stage completion checks (used for resume validation) ──────────────────
+
+def _cubemaps_done(images_dir: str) -> bool:
+    if not os.path.isdir(images_dir):
+        return False
+    exts = (".jpg", ".jpeg", ".png")
+    count = len([f for f in os.listdir(images_dir) if f.lower().endswith(exts)])
+    return count > 0
+
+
+def _colmap_done(scene_out: str) -> bool:
+    sparse0 = os.path.join(scene_out, "sparse", "0")
+    if not os.path.isdir(sparse0):
+        return False
+    for stem in ("cameras", "images", "points3D"):
+        bin_path = os.path.join(sparse0, f"{stem}.bin")
+        txt_path = os.path.join(sparse0, f"{stem}.txt")
+        has_bin = os.path.exists(bin_path) and os.path.getsize(bin_path) > 50
+        has_txt = os.path.exists(txt_path) and os.path.getsize(txt_path) > 50
+        if not has_bin and not has_txt:
+            return False
+    # Specifically guard against the near-empty points3D.bin failure mode
+    # we hit earlier — require a meaningfully sized points file.
+    points_bin = os.path.join(sparse0, "points3D.bin")
+    if os.path.exists(points_bin) and os.path.getsize(points_bin) < 200:
+        return False
+    return True
+
+
+def _cleaning_done(cleaned_ply: str) -> bool:
+    return os.path.exists(cleaned_ply) and os.path.getsize(cleaned_ply) > 200
+
+
+def _gaussian_done(scene_out: str) -> bool:
+    pc_dir = os.path.join(scene_out, "gaussian_output", "point_cloud")
+    if not os.path.isdir(pc_dir):
+        return False
+    for entry in os.listdir(pc_dir):
+        if entry.startswith("iteration_"):
+            candidate = os.path.join(pc_dir, entry, "point_cloud.ply")
+            if os.path.exists(candidate) and os.path.getsize(candidate) > 200:
+                return True
+    return False
 
 
 def _validate_colmap_output(scene_out: str):
@@ -77,6 +122,15 @@ def _validate_colmap_output(scene_out: str):
                 "COLMAP reconstruction may be incomplete."
             )
 
+    points_bin = os.path.join(sparse0, "points3D.bin")
+    if os.path.exists(points_bin) and os.path.getsize(points_bin) < 200:
+        raise RuntimeError(
+            f"COLMAP produced an essentially empty points3D.bin "
+            f"({os.path.getsize(points_bin)} bytes) — the reconstruction "
+            f"failed to triangulate points. Try exhaustive_matcher or check "
+            f"image overlap/quality."
+        )
+
     sparse0_files = os.listdir(sparse0)
     print(
         f"[FastGS] Validated scene: {img_count} images, "
@@ -85,21 +139,6 @@ def _validate_colmap_output(scene_out: str):
 
 
 def _run_cleaning_subprocess(db, job, sparse_ply: str, cleaned_ply: str, scene_out: str) -> dict:
-    """
-    Runs point cloud cleaning in an ISOLATED subprocess instead of in-process.
-
-    Why: clean_point_cloud() previously ran directly inside the Celery
-    worker process. If Open3D crashed (segfault) or the OS OOM-killer
-    stepped in due to GPU/memory pressure right after COLMAP, it took the
-    entire worker down with it — the job was left stuck forever with no
-    error message, since Python never got a chance to catch anything.
-
-    Running it as `python -m app.pipeline.clean_pointcloud_runner` in a
-    subprocess means:
-      - A crash/OOM kill there only kills that subprocess.
-      - We get a real returncode and can raise a clear, visible error.
-      - A timeout guarantees we never hang forever.
-    """
     runner_cmd = [
         sys.executable, "-m", "app.pipeline.clean_pointcloud_runner",
         "--input", sparse_ply,
@@ -121,8 +160,6 @@ def _run_cleaning_subprocess(db, job, sparse_ply: str, cleaned_ply: str, scene_o
             f"The scene may be too large, or Open3D may be hanging on this GPU."
         )
 
-    # Print whatever the subprocess logged, so it still shows up in the
-    # worker's console for debugging.
     if result.stdout:
         print(result.stdout, flush=True)
     if result.stderr:
@@ -135,7 +172,6 @@ def _run_cleaning_subprocess(db, job, sparse_ply: str, cleaned_ply: str, scene_o
             f"Last output: {(result.stdout or result.stderr)[-500:]}"
         )
 
-    # The runner script writes its stats as the last line of stdout, as JSON.
     try:
         last_line = [l for l in result.stdout.strip().splitlines() if l.strip()][-1]
         stats = json.loads(last_line)
@@ -194,7 +230,7 @@ def _run_fastgs(db, job, scene_out: str):
                 iteration = int(m.group(1))
 
         if iteration is not None:
-            pct = 65 + int((iteration / FASTGS_ITERATIONS) * 20)  # 65→85
+            pct = 65 + int((iteration / FASTGS_ITERATIONS) * 20)
             if pct != last_progress:
                 last_progress = pct
                 _set(db, job, progress=pct, log_tail=line[:200])
@@ -211,11 +247,6 @@ def _run_fastgs(db, job, scene_out: str):
 
 
 def _export_colmap_ply(scene_out: str) -> str:
-    """
-    If COLMAP wrote .bin files instead of a PLY, use colmap model_converter
-    to export a PLY we can feed to Open3D.
-    Returns the path to the exported PLY.
-    """
     sparse0  = os.path.join(scene_out, "sparse", "0")
     ply_path = os.path.join(sparse0, "points3D.ply")
 
@@ -238,71 +269,92 @@ def _export_colmap_ply(scene_out: str) -> str:
 
 
 @celery.task(bind=True)
-def run_pipeline(self, job_id: str):
+def run_pipeline(self, job_id: str, resume: bool = False):
     db = SessionLocal()
     job = db.query(Job).get(job_id)
     try:
-        _set(db, job, status="running", progress=0)
-
         scene_out  = os.path.abspath(os.path.join(settings.storage_outputs, job_id))
         images_dir = os.path.join(scene_out, "images")
-
-        if os.path.exists(scene_out):
-            print(f"[pipeline] Removing previous output dir: {scene_out}")
-            shutil.rmtree(scene_out)
-        os.makedirs(scene_out, exist_ok=True)
-
-        # ---- Stage 2: Cubemaps ----
-        _set(db, job, stage="cubemaps", progress=5)
-        cube_summary = generate_cubemaps(job.upload_path, images_dir)
-        print(f"[cubemaps] {cube_summary}")
-        _set(db, job, progress=20)
-
-        # ---- Stage 3: COLMAP ----
-        _set(db, job, stage="colmap", progress=25)
-        colmap_summary = run_colmap(images_dir, scene_out, use_gpu=True)
-        job.summary = json.dumps({"colmap": colmap_summary})
-        _set(db, job, progress=50)
-
-        # ---- Stage 4: Point Cloud Cleaning (now isolated in a subprocess) ----
-        _set(db, job, stage="cleaning", progress=52,
-             log_tail="Starting point cloud cleaning...")
-
-        sparse_ply = os.path.join(scene_out, "sparse", "0", "points3D.ply")
-        if not os.path.exists(sparse_ply):
-            sparse_ply = _export_colmap_ply(scene_out)
-
         cleaned_ply = os.path.join(scene_out, "sparse", "0", "points3D_cleaned.ply")
 
-        try:
-            cleaning_stats = _run_cleaning_subprocess(db, job, sparse_ply, cleaned_ply, scene_out)
-            print(
-                f"[cleaning] Done — {cleaning_stats['structure_kept']}% structure kept, "
-                f"{cleaning_stats['final_points']:,} points remaining"
-            )
-            summary = json.loads(job.summary or "{}")
-            summary["cleaning"] = cleaning_stats
-            job.summary = json.dumps(summary)
-            _set(db, job, progress=63,
-                 log_tail=f"Cleaned: {cleaning_stats['structure_kept']}% kept")
+        if resume:
+            print(f"[pipeline] RESUME requested for job {job_id}, last stage was '{job.stage}'")
+            _set(db, job, status="running", error=None)
+            if not os.path.isdir(scene_out):
+                raise RuntimeError(
+                    "Cannot resume — output directory no longer exists. "
+                    "Start a fresh reconstruction instead."
+                )
+        else:
+            _set(db, job, status="running", progress=0)
+            if os.path.exists(scene_out):
+                print(f"[pipeline] Removing previous output dir: {scene_out}")
+                shutil.rmtree(scene_out)
+            os.makedirs(scene_out, exist_ok=True)
 
-        except Exception as clean_err:
-            # Cleaning failure is non-fatal — fall back to raw PLY and
-            # CONTINUE the pipeline instead of silently dying. This is the
-            # key fix: previously an uncaught crash here killed the whole
-            # worker process and the job just sat stuck forever with no
-            # visible error.
-            print(f"[cleaning] WARNING: cleaning failed ({clean_err}) — using raw PLY")
-            cleaned_ply = sparse_ply
-            _set(db, job, progress=63,
-                 log_tail=f"Cleaning failed, using raw point cloud: {str(clean_err)[:150]}")
+        # ---- Stage 2: Cubemaps ----
+        skip_cubemaps = resume and _cubemaps_done(images_dir)
+        if skip_cubemaps:
+            print("[pipeline] RESUME: cubemaps already present — skipping")
+        else:
+            _set(db, job, stage="cubemaps", progress=5)
+            cube_summary = generate_cubemaps(job.upload_path, images_dir)
+            print(f"[cubemaps] {cube_summary}")
+            _set(db, job, progress=20)
+
+        # ---- Stage 3: COLMAP ----
+        skip_colmap = resume and _colmap_done(scene_out)
+        if skip_colmap:
+            print("[pipeline] RESUME: COLMAP output already valid — skipping")
+        else:
+            _set(db, job, stage="colmap", progress=25)
+            colmap_summary = run_colmap(images_dir, scene_out, use_gpu=True)
+            job.summary = json.dumps({"colmap": colmap_summary})
+            _set(db, job, progress=50)
+
+        # ---- Stage 4: Point Cloud Cleaning ----
+        sparse_ply = os.path.join(scene_out, "sparse", "0", "points3D.ply")
+
+        skip_cleaning = resume and _cleaning_done(cleaned_ply)
+        if skip_cleaning:
+            print("[pipeline] RESUME: cleaned point cloud already present — skipping")
+            _set(db, job, stage="cleaning", progress=63)
+        else:
+            _set(db, job, stage="cleaning", progress=52,
+                 log_tail="Starting point cloud cleaning...")
+
+            if not os.path.exists(sparse_ply):
+                sparse_ply = _export_colmap_ply(scene_out)
+
+            try:
+                cleaning_stats = _run_cleaning_subprocess(db, job, sparse_ply, cleaned_ply, scene_out)
+                print(
+                    f"[cleaning] Done — {cleaning_stats['structure_kept']}% structure kept, "
+                    f"{cleaning_stats['final_points']:,} points remaining"
+                )
+                summary = json.loads(job.summary or "{}")
+                summary["cleaning"] = cleaning_stats
+                job.summary = json.dumps(summary)
+                _set(db, job, progress=63,
+                     log_tail=f"Cleaned: {cleaning_stats['structure_kept']}% kept")
+            except Exception as clean_err:
+                print(f"[cleaning] WARNING: cleaning failed ({clean_err}) — using raw PLY")
+                cleaned_ply = sparse_ply
+                _set(db, job, progress=63,
+                     log_tail=f"Cleaning failed, using raw point cloud: {str(clean_err)[:150]}")
 
         # ---- Stage 5: Gaussian Splatting ----
-        _set(db, job, stage="gaussian_splat", progress=65,
-             log_tail="Starting FastGS training...")
-        _run_fastgs(db, job, scene_out)
-        _set(db, job, stage="gaussian_splat", progress=85,
-             log_tail="FastGS training complete.")
+        skip_gaussian = resume and _gaussian_done(scene_out)
+        if skip_gaussian:
+            print("[pipeline] RESUME: Gaussian splat output already present — skipping")
+            _set(db, job, stage="gaussian_splat", progress=85,
+                 log_tail="FastGS training complete (already done).")
+        else:
+            _set(db, job, stage="gaussian_splat", progress=65,
+                 log_tail="Starting FastGS training...")
+            _run_fastgs(db, job, scene_out)
+            _set(db, job, stage="gaussian_splat", progress=85,
+                 log_tail="FastGS training complete.")
 
         # ---- Remaining stages stubbed ----
         for i, stage in enumerate(STUB_STAGES):
@@ -316,10 +368,6 @@ def run_pipeline(self, job_id: str):
     except SoftTimeLimitExceeded:
         _set(db, job, status="failed", error="Pipeline exceeded time limit (stuck or hung)")
         raise
-    except Exception as e:
-        _set(db, job, status="failed", error=str(e))
-        raise
-    
     except Exception as e:
         _set(db, job, status="failed", error=str(e))
         raise

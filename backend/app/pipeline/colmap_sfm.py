@@ -16,7 +16,6 @@ def _resize_images(src_dir: str, dst_dir: str, max_width: int) -> str:
     try:
         import cv2
     except ImportError:
-        # No cv2 — just symlink/copy as-is
         if src_dir != dst_dir:
             shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
         return dst_dir
@@ -30,6 +29,7 @@ def _resize_images(src_dir: str, dst_dir: str, max_width: int) -> str:
         dst = os.path.join(dst_dir, fname)
         img = cv2.imread(src)
         if img is None:
+            print(f"[colmap] WARNING: cv2 could not read {fname}, skipping", flush=True)
             continue
         h, w = img.shape[:2]
         if w > max_width:
@@ -79,17 +79,38 @@ def _camera_center(image):
 
 def run_colmap(images_dir: str, work_dir: str, use_gpu: bool = False) -> dict:
     """
-    Run COLMAP on equirectangular 360 panoramas.
-    - Resizes images to MAX_COLMAP_WIDTH first (11968px is too large for COLMAP)
-    - Uses SIMPLE_RADIAL camera model (SPHERICAL not in this COLMAP build)
-    - One camera model shared per folder (single_camera=1)
+    Run COLMAP on perspective views generated from 360 panoramas.
+
+    Pipeline:
+      1. Feature extraction with SIMPLE_RADIAL (per-image cameras, radial
+         distortion — better reconstruction quality than SIMPLE_PINHOLE)
+      2. Exhaustive matching (correct for non-sequential panoramic datasets)
+      3. Mapper (produces distorted sparse model)
+      4. image_undistorter (converts SIMPLE_RADIAL -> PINHOLE, produces
+         undistorted images) — this is what FastGS actually needs, since
+         FastGS only supports PINHOLE / SIMPLE_PINHOLE camera models.
+         Without this step, FastGS crashes with:
+           "Colmap camera model not handled: only undistorted datasets supported"
+      5. Replace sparse/0 and images/ with the undistorted versions so
+         the rest of the pipeline (cleaning, FastGS) works unchanged.
     """
     os.makedirs(work_dir, exist_ok=True)
 
-    # Step 0: Resize images to a manageable size
+    # Step 0: Resize images
     resized_dir = os.path.join(work_dir, "colmap_images_resized")
     print(f"[colmap] Resizing images to max width {MAX_COLMAP_WIDTH}px...", flush=True)
     images_dir = _resize_images(images_dir, resized_dir, MAX_COLMAP_WIDTH)
+
+    resized_count = len([
+        f for f in os.listdir(images_dir)
+        if f.lower().endswith((".jpg", ".jpeg", ".png"))
+    ])
+    print(f"[colmap] {resized_count} images ready in {images_dir}", flush=True)
+    if resized_count == 0:
+        raise RuntimeError(
+            f"No images survived resizing in {images_dir} — check that "
+            f"the cubemaps stage actually wrote files to its images dir."
+        )
 
     db_path    = os.path.join(work_dir, "database.db")
     sparse_dir = os.path.join(work_dir, "sparse")
@@ -97,65 +118,74 @@ def run_colmap(images_dir: str, work_dir: str, use_gpu: bool = False) -> dict:
 
     gpu_flag = "1" if use_gpu else "0"
 
-    # 1) Feature extraction
-    #    SIMPLE_PINHOLE — FastGS ONLY accepts PINHOLE or SIMPLE_PINHOLE.
-    #    single_camera=1 means all images share one camera model (same physical camera).
+    # 1) Feature extraction — SIMPLE_RADIAL per image for best reconstruction.
+    #    FastGS doesn't support SIMPLE_RADIAL directly, but we undistort
+    #    in step 4 to convert everything to PINHOLE before handing off.
     _run([
         COLMAP_BIN, "feature_extractor",
         "--database_path", db_path,
         "--image_path", images_dir,
-        "--ImageReader.single_camera", "1",
-        "--ImageReader.camera_model", "SIMPLE_PINHOLE",
+        "--ImageReader.single_camera", "0",
+        "--ImageReader.camera_model", "SIMPLE_RADIAL",
         "--FeatureExtraction.use_gpu", gpu_flag,
+        "--FeatureExtraction.gpu_index", "-1",
         "--FeatureExtraction.num_threads", "-1",
         "--SiftExtraction.max_num_features", "16384",
-        "--SiftExtraction.peak_threshold", "0.003",
+        "--SiftExtraction.peak_threshold", "0.0067",
         "--SiftExtraction.max_image_size", "3200",
     ], stream=True)
 
-    # 2) Matching — sequential first (catches adjacent views), then vocab tree for loop closure
-    # For 450-1050 images, exhaustive is too slow. Sequential + vocab tree is standard.
+    # 2) Exhaustive matching
+    # NOTE: flag renamed from --SiftMatching.use_gpu to --FeatureMatching.use_gpu
+    # in newer COLMAP versions.
     _run([
-        COLMAP_BIN, "sequential_matcher",
+        COLMAP_BIN, "exhaustive_matcher",
         "--database_path", db_path,
         "--FeatureMatching.use_gpu", gpu_flag,
-        "--SequentialMatching.overlap", "15",
-        "--SequentialMatching.quadratic_overlap", "1",
-        "--SequentialMatching.loop_detection", "1",
-        "--SequentialMatching.loop_detection_period", "10",
-        "--SequentialMatching.loop_detection_num_images", "50",
+        "--FeatureMatching.gpu_index", "-1",
     ], stream=True)
 
-    # 3) Mapper — loose thresholds for indoor 360° scenes
+    # 3) Mapper
     _run([
         COLMAP_BIN, "mapper",
         "--database_path", db_path,
         "--image_path", images_dir,
         "--output_path", sparse_dir,
-        "--Mapper.init_min_num_inliers", "8",
-        "--Mapper.init_min_tri_angle", "2",
-        "--Mapper.abs_pose_min_num_inliers", "8",
-        "--Mapper.abs_pose_min_inlier_ratio", "0.05",
-        "--Mapper.max_reg_trials", "10",
-        "--Mapper.ba_global_max_num_iterations", "30",
-        "--Mapper.min_num_matches", "8",
+        "--Mapper.init_min_num_inliers", "100",
+        "--Mapper.init_min_tri_angle", "4",
+        "--Mapper.abs_pose_min_num_inliers", "30",
+        "--Mapper.abs_pose_min_inlier_ratio", "0.25",
+        "--Mapper.max_reg_trials", "5",
+        "--Mapper.ba_global_max_num_iterations", "50",
+        "--Mapper.min_num_matches", "15",
+        "--Mapper.multiple_models", "1",
     ], stream=True)
 
     # Pick largest reconstruction
     model0     = os.path.join(sparse_dir, "0")
     best_model = model0
     best_count = 0
-    for sub in os.listdir(sparse_dir):
+    all_models_found = []
+    for sub in sorted(os.listdir(sparse_dir)):
         sub_path = os.path.join(sparse_dir, sub)
         if os.path.exists(os.path.join(sub_path, "cameras.bin")):
             try:
                 r = pycolmap.Reconstruction(sub_path)
                 n = r.num_reg_images()
+                all_models_found.append((sub, n))
                 if n > best_count:
                     best_count = n
                     best_model = sub_path
             except Exception:
                 pass
+
+    if len(all_models_found) > 1:
+        print(
+            f"[colmap] WARNING: mapper produced {len(all_models_found)} separate "
+            f"reconstructions instead of one connected model: {all_models_found}. "
+            f"Using the largest one ({best_count} images).",
+            flush=True,
+        )
 
     if not os.path.exists(os.path.join(best_model, "cameras.bin")):
         raise RuntimeError(
@@ -166,40 +196,99 @@ def run_colmap(images_dir: str, work_dir: str, use_gpu: bool = False) -> dict:
 
     print(f"[colmap] Best model: {best_model} with {best_count} registered images", flush=True)
 
-    # 4) Export sparse PLY
-    ply_path = os.path.join(work_dir, "points.ply")
-    _run([
-        COLMAP_BIN, "model_converter",
-        "--input_path", best_model,
-        "--output_path", ply_path,
-        "--output_type", "PLY",
-    ])
-
+    # If best model isn't model0, move it there so undistorter always reads from sparse/0
     if best_model != model0:
         if os.path.exists(model0):
             shutil.rmtree(model0)
         shutil.copytree(best_model, model0)
+        best_model = model0
 
-    # 5) Dense reconstruction — skip for equirectangular (undistorter doesn't support it well)
-    #    FastGS doesn't need it anyway
-    dense_ply = None
+    # 4) UNDISTORT — THE PERMANENT FIX FOR FastGS CAMERA MODEL ERROR
+    #
+    #    FastGS crashes on SIMPLE_RADIAL with:
+    #      "Colmap camera model not handled: only undistorted datasets
+    #       (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
+    #
+    #    colmap image_undistorter:
+    #      - reads the distorted sparse/0 + original images
+    #      - produces undistorted images in dense/images/
+    #      - produces a new sparse model in dense/sparse/ with PINHOLE cameras
+    #    We then replace sparse/0 and images/ with the undistorted versions
+    #    so the rest of the pipeline is unaffected.
+    dense_dir = os.path.join(work_dir, "dense")
+    os.makedirs(dense_dir, exist_ok=True)
+
+    print("[colmap] Running image_undistorter to convert SIMPLE_RADIAL -> PINHOLE for FastGS...", flush=True)
+    _run([
+        COLMAP_BIN, "image_undistorter",
+        "--image_path", images_dir,
+        "--input_path", model0,
+        "--output_path", dense_dir,
+        "--output_type", "COLMAP",
+        "--max_image_size", "3200",
+    ], stream=True)
+
+    # dense/sparse/ contains the undistorted PINHOLE model
+    # dense/images/ contains the undistorted images
+    dense_sparse = os.path.join(dense_dir, "sparse")
+    dense_images = os.path.join(dense_dir, "images")
+
+    if not os.path.isdir(dense_sparse) or not os.path.isdir(dense_images):
+        raise RuntimeError(
+            f"image_undistorter did not produce expected output at {dense_dir}. "
+            f"Contents: {os.listdir(dense_dir) if os.path.isdir(dense_dir) else 'directory missing'}"
+        )
+
+    undist_img_count = len([
+        f for f in os.listdir(dense_images)
+        if f.lower().endswith((".jpg", ".jpeg", ".png"))
+    ])
+    print(f"[colmap] Undistortion complete: {undist_img_count} undistorted images", flush=True)
+
+    # Replace sparse/0 with the undistorted PINHOLE model
+    if os.path.exists(model0):
+        shutil.rmtree(model0)
+    shutil.copytree(dense_sparse, model0)
+    print(f"[colmap] Replaced sparse/0 with undistorted PINHOLE model", flush=True)
+
+    # 5) Export sparse PLY from the undistorted model
+    ply_path = os.path.join(work_dir, "points.ply")
+    _run([
+        COLMAP_BIN, "model_converter",
+        "--input_path", model0,
+        "--output_path", ply_path,
+        "--output_type", "PLY",
+    ])
+
     print("[colmap] Skipping dense reconstruction (not needed for FastGS)", flush=True)
 
-    # 7) Copy resized panoramas into the images/ dir (sibling of sparse/)
-    #    FastGS reads image filenames from COLMAP's images.bin — those names
-    #    point to the resized panoramas, so they must exist in images/.
+    # 6) Set up images/ for FastGS using the UNDISTORTED images.
+    #    FastGS must use the same images that match the undistorted camera model —
+    #    using the original distorted images with an undistorted camera model
+    #    would produce a broken splat.
     fastgs_images_dir = os.path.join(work_dir, "images")
-    os.makedirs(fastgs_images_dir, exist_ok=True)
-    copied = 0
-    for fname in os.listdir(images_dir):
-        src = os.path.join(images_dir, fname)
-        dst = os.path.join(fastgs_images_dir, fname)
-        if not os.path.exists(dst):
-            shutil.copy2(src, dst)
-            copied += 1
-    print(f"[colmap] Copied {copied} resized panoramas -> images/ for FastGS", flush=True)
 
+    # If images/ exists from a previous run or earlier step, clear it
+    # so we don't mix distorted and undistorted images.
+    if os.path.exists(fastgs_images_dir):
+        shutil.rmtree(fastgs_images_dir)
+    shutil.copytree(dense_images, fastgs_images_dir)
 
+    final_count = len([
+        f for f in os.listdir(fastgs_images_dir)
+        if f.lower().endswith((".jpg", ".jpeg", ".png"))
+    ])
+    print(
+        f"[colmap] Copied {final_count} undistorted images -> images/",
+        flush=True,
+    )
+    if final_count == 0:
+        raise RuntimeError(
+            f"images/ folder is empty after undistortion copy ({fastgs_images_dir}). "
+            f"Undistortion may have produced no output images."
+        )
+
+    # Read final stats from the undistorted model
     recon = pycolmap.Reconstruction(model0)
     cameras = []
     try:
@@ -217,16 +306,18 @@ def run_colmap(images_dir: str, work_dir: str, use_gpu: bool = False) -> dict:
 
     summary = {
         "registered_images": n_reg,
+        "total_input_images": resized_count,
         "points3D": recon.num_points3D(),
         "cameras": len(recon.cameras),
         "camera_positions": cameras,
         "ply_file": "points.ply",
         "model_path": model0,
         "dense_ply": None,
+        "fragmented_models": len(all_models_found) if len(all_models_found) > 1 else None,
     }
     print(
-        f"[colmap] {summary['registered_images']} images registered, "
-        f"{summary['points3D']} sparse points",
+        f"[colmap] {summary['registered_images']}/{summary['total_input_images']} "
+        f"images registered, {summary['points3D']} sparse points",
         flush=True,
     )
     return summary

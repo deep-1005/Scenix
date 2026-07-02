@@ -90,4 +90,4 @@ def run_fastgs(scene_dir: str, work_dir: str, stream=False):
 
     # Return path to the output ply
     ply_path = output_dir / "point_cloud" / "iteration_7000" / "point_cloud.ply"
-    return str(ply_path) if ply_path.exists() else str(output_dir)
+    return str(ply_path) if ply_path.exists() else str(output_dir) 
