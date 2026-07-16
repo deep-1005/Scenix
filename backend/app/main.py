@@ -2,6 +2,7 @@ import os
 import json
 import re
 import shutil
+import asyncio
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -12,10 +13,11 @@ from app.core.config import settings
 from app.pipeline.fastgs import run_fastgs
 from starlette.middleware.cors import CORSMiddleware as StarletteCORSMiddleware
 from starlette.applications import Starlette
+from fastapi.middleware.cors import CORSMiddleware
 
 # ── App setup (this was missing — `app` must exist before any @app.* decorator) ──
 app = FastAPI(title="Forensic Digital Twin API")
-app.add_middleware(CORSMiddleware, allow_origins=["*"],
+app.add_middleware(CORSMiddleware, allow_origins=["*"],allow_credentials=False,
                    allow_methods=["*"], allow_headers=["*"])
 
 # Matches perspective-view filenames produced by generate_cubemaps(),
@@ -88,6 +90,37 @@ def _find_splat_ply(job_id: str) -> str | None:
 
 # ── Jobs ───────────────────────────────────────────────────────────────────────
 
+def _save_files_sync(dest: str, files_data: list[tuple[str, bytes]]):
+    """
+    Runs in a worker thread via asyncio.to_thread — keeps the actual
+    (blocking) disk writes off the event loop so uvicorn can keep
+    responding to other requests (health checks, job polls, etc.)
+    while a large multi-image upload is being written to disk.
+
+    [FORENSIC FIX] Previously wrote each file using ONLY its original
+    filename (`os.path.join(dest, filename)`), with no collision handling.
+    Phone photo exports very commonly reuse filenames across different
+    capture sessions/folders (IMG_0001.jpg, IMG_0002.jpg, ...). If two
+    uploaded files shared a name, the second silently overwrote the first
+    on disk — no error, no warning — so the same "810 photos" could yield
+    a different number of surviving files on different upload attempts,
+    depending on enumeration order. Every file now gets a disk-unique name
+    (an index prefix), so collisions are structurally impossible, while the
+    original name is still preserved (after the prefix) for reference.
+    """
+    seen_names = set()
+    for i, (filename, content) in enumerate(files_data):
+        safe_name = os.path.basename(filename or f"upload_{i}")
+        unique_name = f"{i:05d}__{safe_name}"
+        if unique_name in seen_names:
+            # Should be structurally impossible given the index prefix,
+            # but guard anyway rather than silently overwriting.
+            base, ext = os.path.splitext(unique_name)
+            unique_name = f"{base}_{i}{ext}"
+        seen_names.add(unique_name)
+        with open(os.path.join(dest, unique_name), "wb") as out:
+            out.write(content)
+
 @app.post("/jobs")
 async def create_job(scene_name: str = Form(...),
                      files: list[UploadFile] = File(...)):
@@ -96,13 +129,30 @@ async def create_job(scene_name: str = Form(...),
     db.add(job); db.commit(); db.refresh(job)
     dest = os.path.join(settings.storage_uploads, job.id)
     os.makedirs(dest, exist_ok=True)
-    for f in files:
-        with open(os.path.join(dest, f.filename), "wb") as out:
-            shutil.copyfileobj(f.file, out)
+
+    # Read uploads asynchronously, then push the actual disk-write work
+    # to a thread so it doesn't block the event loop. Previously this used
+    # a synchronous `shutil.copyfileobj` loop directly inside `async def`,
+    # which froze the entire server for the duration of the write — long
+    # enough over a slow connection (e.g. via ngrok) to trip proxy
+    # timeouts and produce ERR_NGROK_3004 on the client side.
+    files_data = [(f.filename, await f.read()) for f in files]
+    print(f"[upload] Received {len(files_data)} file(s) for job {job.id}", flush=True)
+    await asyncio.to_thread(_save_files_sync, dest, files_data)
+
+    on_disk = len(os.listdir(dest))
+    if on_disk != len(files_data):
+        print(
+            f"[upload] WARNING: received {len(files_data)} file(s) but only "
+            f"{on_disk} exist on disk after save for job {job.id} — check "
+            f"disk space / permissions.",
+            flush=True,
+        )
+
     job.upload_path = dest; db.commit()
     run_pipeline.delay(job.id)
     jid = job.id; db.close()
-    return {"job_id": jid, "status": "queued"}
+    return {"job_id": jid, "status": "queued", "files_received": len(files_data), "files_saved": on_disk}
 
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
@@ -121,8 +171,9 @@ def resume_job(job_id: str):
         db.close()
         raise HTTPException(404, "job not found")
     if job.status != "failed":
+        current_status = job.status
         db.close()
-        raise HTTPException(400, f"Can only resume failed jobs (current status: {job.status})")
+        raise HTTPException(400, f"Can only resume failed jobs (current status: {current_status})")
     from_stage = job.stage
     db.close()
     run_pipeline.delay(job_id, resume=True)
@@ -210,6 +261,25 @@ def get_splat(job_id: str):
         headers={"Content-Disposition": f'attachment; filename="{job_id}_gaussian.ply"'},
     )
 
+# [FORENSIC FIX] SuGaR refinement stage is temporarily disabled — the
+# app.pipeline.sugar_refine module is missing (see tasks.py, which no
+# longer imports/calls it either). Both endpoints below now return a clear
+# 404 instead of crashing the entire API at import time, which is what
+# was happening before: `from app.pipeline.sugar_refine import
+# find_sugar_outputs` at the top of this file raised ModuleNotFoundError
+# on startup, so FastAPI never came up and every request (including
+# POST /jobs) just hung/failed with no response — that's why "Starting..."
+# never resolved in the UI.
+@app.get("/jobs/{job_id}/sugar-mesh")
+def get_sugar_mesh(job_id: str):
+    """SuGaR's refined, UV-textured mesh (.obj) — currently disabled."""
+    raise HTTPException(404, "SuGaR refinement is currently disabled")
+
+@app.get("/jobs/{job_id}/sugar-splat")
+def get_sugar_splat(job_id: str):
+    """SuGaR's refined Gaussian splat .ply — currently disabled."""
+    raise HTTPException(404, "SuGaR refinement is currently disabled")
+
 @app.delete("/jobs/{job_id}")
 def delete_job(job_id: str):
     db = SessionLocal()
@@ -269,7 +339,7 @@ async def start_gaussian_splat(job_id: str, background_tasks: BackgroundTasks):
         raise HTTPException(400, "COLMAP sparse/0 output not found — run COLMAP first")
     def _run():
         try:
-            run_fastgs(scene_dir=scene_dir, work_dir=scene_dir, stream=False)
+            run_fastgs(scene_dir=scene_dir, work_dir=scene_dir)
         except Exception as e:
             print(f"[FastGS] ERROR for job {job_id}: {e}")
     background_tasks.add_task(_run)
@@ -289,3 +359,36 @@ def gaussian_splat_status(job_id: str):
 def download_splat_legacy(job_id: str):
     """Legacy endpoint — redirects to /splat."""
     return get_splat(job_id)
+
+
+# backend/app/main.py
+
+@app.get("/jobs/{job_id}/evidence")
+def get_evidence(job_id: str):
+    scene_out = os.path.abspath(os.path.join(settings.storage_outputs, job_id))
+
+    classified_path = os.path.join(scene_out, "evidence_classified.json")
+    measurements_path = os.path.join(scene_out, "measurements.json")
+
+    if not os.path.exists(classified_path):
+        return {"status": "not_ready", "evidence": [], "room_dimensions": None}
+
+    with open(classified_path) as f:
+        evidence = json.load(f)
+
+    room_dimensions = None
+    unit = "colmap_units"
+    if os.path.exists(measurements_path):
+        with open(measurements_path) as f:
+            measurements = json.load(f)
+        room_dimensions = measurements.get("room_dimensions")
+        unit = measurements.get("unit", "colmap_units")
+        # measurements.json's evidence list has the authoritative dimensions —
+        # merge those in by id since evidence_classified.json only has label/classification
+        dims_by_id = {e["id"]: e for e in measurements.get("evidence", [])}
+        for item in evidence:
+            if item["id"] in dims_by_id:
+                item["dimensions"] = dims_by_id[item["id"]]["dimensions"]
+                item["centroid"] = dims_by_id[item["id"]]["centroid"]
+
+    return {"status": "ready", "evidence": evidence, "room_dimensions": room_dimensions, "unit": unit}

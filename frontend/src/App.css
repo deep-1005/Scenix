@@ -1,29 +1,29 @@
-/* ── Forensic Digital Twin — Dark Theme ── */
+/* ── Scenix — Light (Beige) Theme ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg-base: #0b0c10;
-  --bg-panel: #0f1117;
-  --bg-raised: #161820;
-  --bg-hover: #1d1f2a;
-  --border: #1f2130;
-  --border-mid: #2a2d3e;
-  --border-hi: #3a3f58;
+  --bg-base: #f2ede3;
+  --bg-panel: #faf7f0;
+  --bg-raised: #ece5d6;
+  --bg-hover: #e4dcc9;
+  --border: #e0d7c4;
+  --border-mid: #d8cdb5;
+  --border-hi: #c2b393;
 
-  --accent: #5b7fff;
-  --accent-dim: rgba(91,127,255,0.12);
-  --accent-border: rgba(91,127,255,0.30);
+  --accent: #0e7c8c;
+  --accent-dim: rgba(14,124,140,0.12);
+  --accent-border: rgba(14,124,140,0.30);
 
-  --success: #3ecf6e;
-  --success-dim: rgba(62,207,110,0.10);
-  --warning: #f5a623;
-  --danger: #e05252;
-  --danger-dim: rgba(224,82,82,0.10);
+  --success: #1a8f5e;
+  --success-dim: rgba(26,143,94,0.10);
+  --warning: #b5670e;
+  --danger: #c0392b;
+  --danger-dim: rgba(192,57,43,0.10);
 
-  --text-primary: #d8daf0;
-  --text-secondary: #7e84a3;
-  --text-dim: #454762;
-  --text-label: #5a5f7d;
+  --text-primary: #232019;
+  --text-secondary: #6b6252;
+  --text-dim: #968972;
+  --text-label: #7a6f57;
 
   --mono: 'SF Mono', 'Fira Code', ui-monospace, 'Courier New', monospace;
   --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -373,7 +373,7 @@ button.primary:disabled { opacity: 0.35; cursor: not-allowed; }
   transition: all 0.2s;
 }
 .step-dot.done { background: var(--success); border-color: var(--success); }
-.step-dot.active { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 3px rgba(91,127,255,0.15); }
+.step-dot.active { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 3px rgba(14,124,140,0.15); }
 .step-dot.error { background: var(--danger); border-color: var(--danger); }
 
 .step-label {
@@ -432,7 +432,7 @@ button.primary:disabled { opacity: 0.35; cursor: not-allowed; }
   border-radius: var(--radius-lg);
   overflow: hidden;
   border: 1px solid var(--border-mid);
-  background: #0d1320;
+  background: #ece2cc;
 }
 
 .viewer-meta {
@@ -461,10 +461,10 @@ button.primary:disabled { opacity: 0.35; cursor: not-allowed; }
   font-family: var(--mono);
 }
 .badge.running { background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent-border); }
-.badge.done { background: var(--success-dim); color: var(--success); border: 1px solid rgba(62,207,110,0.2); }
-.badge.failed { background: var(--danger-dim); color: var(--danger); border: 1px solid rgba(224,82,82,0.2); }
+.badge.done { background: var(--success-dim); color: var(--success); border: 1px solid rgba(26,143,94,0.2); }
+.badge.failed { background: var(--danger-dim); color: var(--danger); border: 1px solid rgba(192,57,43,0.2); }
 .badge.pending { background: var(--bg-raised); color: var(--text-dim); border: 1px solid var(--border-mid); }
-.badge.complete { background: var(--success-dim); color: var(--success); border: 1px solid rgba(62,207,110,0.2); }
+.badge.complete { background: var(--success-dim); color: var(--success); border: 1px solid rgba(26,143,94,0.2); }
 .badge.queued { background: var(--bg-raised); color: var(--text-dim); border: 1px solid var(--border-mid); }
 
 /* ── Download link ── */
@@ -567,7 +567,7 @@ a.download-btn:hover {
 .btn-danger-ghost {
   background: transparent;
   color: var(--danger);
-  border: 1px solid rgba(224,82,82,0.3);
+  border: 1px solid rgba(192,57,43,0.3);
 }
 .btn-danger-ghost:hover { background: var(--danger-dim); }
 .btn-sm { padding: 4px 10px; font-size: 11px; }
@@ -652,7 +652,7 @@ a.download-btn:hover {
   align-items: flex-start;
   gap: 10px;
   background: var(--danger-dim);
-  border: 1px solid rgba(224,82,82,0.2);
+  border: 1px solid rgba(192,57,43,0.2);
   border-radius: var(--radius);
   padding: 12px 14px;
   font-size: 13px;
@@ -779,18 +779,18 @@ a.download-btn:hover {
 }
 
 .toast-info {
-  background: rgba(22, 24, 32, 0.95);
+  background: rgba(250, 247, 240, 0.97);
   border: 1px solid var(--accent-border);
   color: var(--text-primary);
 }
 .toast-success {
-  background: rgba(22, 24, 32, 0.95);
-  border: 1px solid rgba(62,207,110,0.35);
+  background: rgba(250, 247, 240, 0.97);
+  border: 1px solid rgba(26,143,94,0.35);
   color: var(--text-primary);
 }
 .toast-error {
-  background: rgba(22, 24, 32, 0.95);
-  border: 1px solid rgba(224,82,82,0.35);
+  background: rgba(250, 247, 240, 0.97);
+  border: 1px solid rgba(192,57,43,0.35);
   color: var(--text-primary);
 }
 

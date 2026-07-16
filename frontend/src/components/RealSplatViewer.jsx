@@ -1,21 +1,27 @@
 import { useEffect, useRef, useState, Component } from "react";
 import * as GaussianSplats3D from "@mkkellogg/gaussian-splats-3d";
-import { splatPlyUrl } from "../api";
+import { splatPlyUrl, apiFetch } from "../api";
 
 // Renders the ACTUAL trained Gaussian splat (ellipsoids, color, opacity) —
 // not just a point cloud of centers. Auto-loads the job's .ply on mount.
 //
-// FIX: the library detects file format from the URL's extension. Our
+// FIX 1: the library detects file format from the URL's extension. Our
 // backend serves the file at /jobs/{id}/splat with no ".ply" anywhere in
 // the path, so format auto-detection failed with "File format not
-// supported" and threw inside a useEffect. React surfaced that as an
-// uncaught render error with no boundary catching it, blanking the whole
-// page. Fixed two ways:
-//   1. Explicitly pass `format: GaussianSplats3D.SceneFormat.Ply` so the
-//      library doesn't need to guess from the URL.
-//   2. Wrap the viewer in a real React error boundary (SplatBoundary
-//      below) so any future failure here shows an inline error card
-//      instead of crashing the whole app.
+// supported" and threw inside a useEffect. Fixed by explicitly passing
+// `format: GaussianSplats3D.SceneFormat.Ply`.
+//
+// FIX 2: addSplatScene() fetches the URL internally, with no way to attach
+// custom headers. Since the backend is behind ngrok's free-tier warning
+// page, that internal fetch was getting HTML back instead of the PLY
+// binary. Fixed by fetching the PLY ourselves via apiFetch (which does
+// carry the ngrok-skip-browser-warning header), turning it into a blob
+// URL, and handing that local blob URL to addSplatScene instead of the
+// raw ngrok URL.
+//
+// Also wrapped in a real React error boundary (SplatBoundary below) so any
+// future failure here shows an inline error card instead of crashing the
+// whole app.
 
 class SplatBoundary extends Component {
   constructor(props) {
@@ -45,6 +51,7 @@ function InnerSplatViewer({ jobId, onError }) {
     if (!jobId || !containerRef.current) return;
 
     let cancelled = false;
+    let blobUrl = null;
     setStatus("loading");
     setErrorMsg("");
 
@@ -59,19 +66,24 @@ function InnerSplatViewer({ jobId, onError }) {
     });
     viewerRef.current = viewer;
 
-    const url = splatPlyUrl(jobId);
-
-    viewer
-      .addSplatScene(url, {
-        // Explicit format — the URL has no file extension (it's served at
-        // /jobs/{id}/splat), so auto-detection from the path fails. This
-        // is what was throwing "File format not supported".
-        format: GaussianSplats3D.SceneFormat.Ply,
-        splatAlphaRemovalThreshold: 5,
-        showLoadingUI: true,
-        position: [0, 0, 0],
-        rotation: [0, 0, 0, 1],
-        scale: [1, 1, 1],
+    apiFetch(splatPlyUrl(jobId))
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return Promise.reject(new Error("cancelled"));
+        blobUrl = URL.createObjectURL(blob);
+        return viewer.addSplatScene(blobUrl, {
+          // Explicit format — the blob URL has no file extension for the
+          // library to auto-detect from, same reason as the original fix.
+          format: GaussianSplats3D.SceneFormat.Ply,
+          splatAlphaRemovalThreshold: 5,
+          showLoadingUI: true,
+          position: [0, 0, 0],
+          rotation: [0, 0, 0, 1],
+          scale: [1, 1, 1],
+        });
       })
       .then(() => {
         if (cancelled) return;
@@ -96,6 +108,7 @@ function InnerSplatViewer({ jobId, onError }) {
       }
       viewerRef.current = null;
       if (containerRef.current) containerRef.current.innerHTML = "";
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
   }, [jobId]);
 

@@ -4,12 +4,6 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
 import { plyUrl } from "../api";
 
-// FIX: zoom/scroll wasn't working because the page itself could still
-// scroll underneath the canvas — the mouse wheel event was bubbling up to
-// the page scroll container instead of being fully captured by Three.js's
-// OrbitControls. We now explicitly stop propagation on wheel events over
-// the canvas, and make sure the mount div has its own isolated stacking
-// context so nothing above it intercepts pointer/wheel events first.
 export default function PointCloudViewer({ jobId, cameraPositions = [] }) {
   const mountRef = useRef(null);
 
@@ -20,7 +14,7 @@ export default function PointCloudViewer({ jobId, cameraPositions = [] }) {
     const height = 460;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0d1320);
+    scene.background = new THREE.Color(0xece2cc);
 
     const camera = new THREE.PerspectiveCamera(60, width / height, 0.01, 1000);
     camera.position.set(0, 0, 4);
@@ -32,19 +26,26 @@ export default function PointCloudViewer({ jobId, cameraPositions = [] }) {
     mount.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.enableZoom = true;
-    controls.enablePan = true;
-    controls.minDistance = 0.05;
-    controls.maxDistance = 500;
-    controls.zoomSpeed = 1.0;
+    controls.enableDamping  = true;
+    controls.enableZoom     = true;
+    controls.enablePan      = true;
+    controls.zoomSpeed      = 1.0;
+    controls.minDistance    = 0.05;
+    controls.maxDistance    = 500;
 
-    // Explicitly stop the wheel event from bubbling up to the page so
-    // scrolling over the viewer always zooms the 3D scene, never the page.
-    const stopWheelPropagation = (e) => { e.stopPropagation(); };
-    renderer.domElement.addEventListener("wheel", stopWheelPropagation, { passive: true });
+    // FIX: OrbitControls defaults to maxPolarAngle = Math.PI which stops
+    // vertical rotation exactly at 180° (straight down). Setting it to
+    // Math.PI * 2 allows the camera to orbit all the way around — full
+    // 360° vertical rotation, not just the top hemisphere.
+    controls.minPolarAngle  = 0;
+    controls.maxPolarAngle  = Math.PI;
+
+    // Stop wheel events bubbling up to page scroll
+    const stopWheel = (e) => e.stopPropagation();
+    renderer.domElement.addEventListener("wheel", stopWheel, { passive: true });
 
     const loader = new PLYLoader();
+    loader.setRequestHeader({ "ngrok-skip-browser-warning": "true" });
     loader.load(
       plyUrl(jobId),
       (geometry) => {
@@ -55,8 +56,7 @@ export default function PointCloudViewer({ jobId, cameraPositions = [] }) {
           vertexColors: hasColor,
           color: hasColor ? 0xffffff : 0x6fb0ff,
         });
-        const points = new THREE.Points(geometry, material);
-        scene.add(points);
+        scene.add(new THREE.Points(geometry, material));
 
         geometry.computeBoundingSphere();
         const r = geometry.boundingSphere.radius || 2;
@@ -88,7 +88,7 @@ export default function PointCloudViewer({ jobId, cameraPositions = [] }) {
 
     return () => {
       cancelAnimationFrame(raf);
-      renderer.domElement.removeEventListener("wheel", stopWheelPropagation);
+      renderer.domElement.removeEventListener("wheel", stopWheel);
       controls.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode)
@@ -96,5 +96,7 @@ export default function PointCloudViewer({ jobId, cameraPositions = [] }) {
     };
   }, [jobId, cameraPositions]);
 
-  return <div className="viewer" ref={mountRef} style={{ isolation: "isolate" }} />;
+  return (
+    <div className="viewer" ref={mountRef} style={{ isolation: "isolate" }} />
+  );
 }

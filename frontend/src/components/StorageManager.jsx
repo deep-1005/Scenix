@@ -3,7 +3,7 @@
 // Logic is unchanged from the original — only styling/markup updated to match the dark theme.
 
 import { useState, useEffect } from "react";
-import { API } from "../api";
+import { API, apiFetch} from "../api";
 
 function fmt(mb) {
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
@@ -30,7 +30,7 @@ export default function StorageManager({ onSelectJob }) {
   async function load() {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/storage/summary`);
+      const res = await apiFetch(`${API}/storage/summary`);
       setJobs(await res.json());
     } catch { }
     setLoading(false);
@@ -40,7 +40,7 @@ export default function StorageManager({ onSelectJob }) {
     if (!confirm(`Delete "${sceneName}" and all its files? This cannot be undone.`)) return;
     setDeleting(jobId);
     try {
-      await fetch(`${API}/jobs/${jobId}`, { method: "DELETE" });
+      await apiFetch(`${API}/jobs/${jobId}`, { method: "DELETE" });
       setJobs(j => j.filter(x => x.job_id !== jobId));
     } catch (e) {
       alert("Delete failed: " + e.message);

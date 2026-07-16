@@ -4,11 +4,6 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
 import { splatPlyUrl } from "../api";
 
-// Renders the FastGS-trained .ply as a colored point cloud.
-// Note: this is a point-cloud preview of the splat centers — true
-// Gaussian splat (ellipsoid + SH) rendering needs a dedicated splat
-// renderer (e.g. SuperSplat / antimatter15 viewer); for an in-app
-// quick look, the point cloud is the right tradeoff.
 export default function SplatViewer({ jobId }) {
   const mountRef = useRef(null);
   const [loadError, setLoadError] = useState(null);
@@ -20,7 +15,7 @@ export default function SplatViewer({ jobId }) {
     const height = 460;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0d1320);
+    scene.background = new THREE.Color(0xece2cc);
 
     const camera = new THREE.PerspectiveCamera(60, width / height, 0.01, 1000);
     camera.position.set(0, 0, 4);
@@ -28,12 +23,25 @@ export default function SplatViewer({ jobId }) {
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.domElement.style.touchAction = "none";
     mount.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
+    controls.enableDamping  = true;
+    controls.enableZoom     = true;
+    controls.enablePan      = true;
+    controls.zoomSpeed      = 1.0;
+
+    // FIX: same 180° lock as PointCloudViewer — remove polar angle cap
+    controls.minPolarAngle  = 0;
+    controls.maxPolarAngle  = Math.PI;
+
+    // Stop wheel events from scrolling the page
+    const stopWheel = (e) => e.stopPropagation();
+    renderer.domElement.addEventListener("wheel", stopWheel, { passive: true });
 
     const loader = new PLYLoader();
+    loader.setRequestHeader({ "ngrok-skip-browser-warning": "true" });
     loader.load(
       splatPlyUrl(jobId),
       (geometry) => {
@@ -51,6 +59,8 @@ export default function SplatViewer({ jobId }) {
         geometry.computeBoundingSphere();
         const r = geometry.boundingSphere.radius || 2;
         camera.position.set(0, 0, r * 2.2);
+        controls.minDistance = r * 0.05;
+        controls.maxDistance = r * 10;
         controls.update();
       },
       undefined,
@@ -70,6 +80,7 @@ export default function SplatViewer({ jobId }) {
 
     return () => {
       cancelAnimationFrame(raf);
+      renderer.domElement.removeEventListener("wheel", stopWheel);
       controls.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode)
@@ -84,15 +95,14 @@ export default function SplatViewer({ jobId }) {
           ● Gaussian splat preview (point cloud of splat centers)
         </span>
       </div>
-      <div className="viewer" ref={mountRef} />
+      <div className="viewer" ref={mountRef} style={{ isolation: "isolate" }} />
       {loadError && (
         <div className="error-box" style={{ marginTop: 10 }}>
           <span>⚠</span><span>{loadError}</span>
         </div>
       )}
       <p className="muted" style={{ marginTop: 8, fontSize: 11 }}>
-        For full splat-quality rendering (ellipsoids + lighting), download the .ply
-        and open it in SuperSplat or another Gaussian splat viewer.
+        Drag to orbit (full 360°), scroll to zoom, right-drag to pan.
       </p>
     </div>
   );

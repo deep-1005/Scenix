@@ -1,12 +1,67 @@
 import { useState, useEffect, useMemo } from "react";
 import JSZip from "jszip";
-import { API } from "../api";
+import { API, apiFetch } from "../api";
 
 function faceLabel(face) {
   if (face === "original") return "Original";
   const m = face.match(/^yaw(-?\d+)_pitch(-?\d+)$/);
   if (!m) return face;
   return `${m[1]}° / ${m[2]}°`;
+}
+
+// <img src="..."> can't carry the ngrok-skip-browser-warning header, so
+// thumbnails fetched directly would hit ngrok's interstitial and silently
+// fail to render. This component fetches the image via apiFetch (which
+// does carry the header), converts it to a blob URL, and renders that
+// instead. Loading/cleanup of the object URL is handled per-instance.
+function CubemapImg({ src, alt }) {
+  const [blobUrl, setBlobUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl;
+    setBlobUrl(null);
+    setFailed(false);
+
+    apiFetch(src)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [src]);
+
+  if (failed) return null;
+  if (!blobUrl) {
+    return (
+      <div
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "rgba(255,255,255,0.03)",
+        }}
+      >
+        <div className="spinner" />
+      </div>
+    );
+  }
+  return <img src={blobUrl} alt={alt} loading="lazy" />;
 }
 
 export default function CubemapGallery({ jobId, cubemapsFullyDone = false }) {
@@ -23,7 +78,7 @@ export default function CubemapGallery({ jobId, cubemapsFullyDone = false }) {
 
     async function load() {
       try {
-        const res = await fetch(`${API}/jobs/${jobId}/cubemaps`);
+        const res = await apiFetch(`${API}/jobs/${jobId}/cubemaps`);
         if (res.status === 404) {
           if (!cancelled) { setCubemaps([]); setError(null); }
           return;
@@ -64,7 +119,7 @@ export default function CubemapGallery({ jobId, cubemapsFullyDone = false }) {
       const zip = new JSZip();
       await Promise.all(
         cubemaps.map(async (cm) => {
-          const res = await fetch(`${API}${cm.url}`);
+          const res = await apiFetch(`${API}${cm.url}`);
           const blob = await res.blob();
           const src = (cm.source_image ?? "unknown").replace(/\.[^/.]+$/, "");
           const ext = cm.url.split(".").pop();
@@ -146,12 +201,7 @@ export default function CubemapGallery({ jobId, cubemapsFullyDone = false }) {
             <div className="cubemap-grid">
               {views.map((cm) => (
                 <div key={cm.face} className="cubemap-tile">
-                  <img
-                    src={`${API}${cm.url}`}
-                    alt={faceLabel(cm.face)}
-                    loading="lazy"
-                    onError={(e) => { e.target.style.display = "none"; }}
-                  />
+                  <CubemapImg src={`${API}${cm.url}`} alt={faceLabel(cm.face)} />
                   <div className="cubemap-tile-label">{faceLabel(cm.face)}</div>
                 </div>
               ))}

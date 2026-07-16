@@ -246,8 +246,13 @@ def _mark_splat_ready(job):
     job.summary = json.dumps(summary)
 
 
-def _build_fastgs_cmd(scene_out: str, model_path: str) -> list:
-    return [
+def _run_fastgs(db, job, scene_out: str):
+    _validate_colmap_output(scene_out)
+
+    model_path = os.path.join(scene_out, "gaussian_output")
+    os.makedirs(model_path, exist_ok=True)
+
+    cmd = [
         CONDA_PYTHON, FASTGS_TRAIN,
         "-s", scene_out,
         "--model_path", model_path,
@@ -262,17 +267,12 @@ def _build_fastgs_cmd(scene_out: str, model_path: str) -> list:
         "--loss_thresh", "0.06",
         "--highfeature_lr", "0.02",
         "--lambda_dssim", "0.3",
+        "--lambda_opacity_reg", "0.01",
+        "--lambda_scale_reg", "0.25",
+        "--scale_reg_ratio", "5",
+        "--reg_from_iter", "1500",
         "--test_iterations", "7000", "15000", "30000",
     ]
-
-
-def _run_fastgs(db, job, scene_out: str):
-    _validate_colmap_output(scene_out)
-
-    model_path = os.path.join(scene_out, "gaussian_output")
-    os.makedirs(model_path, exist_ok=True)
-
-    cmd = _build_fastgs_cmd(scene_out, model_path)
     print(f"[FastGS] Launching: {' '.join(cmd)}")
     print(f"[FastGS] cwd={FASTGS_DIR}, scene={scene_out}")
 

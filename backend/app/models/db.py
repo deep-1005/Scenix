@@ -24,6 +24,7 @@ class Job(Base):
     summary     = Column(Text,     default="{}")
     error       = Column(Text,     default="")
     log_tail    = Column(Text,     default="")          # last line of FastGS output
+    task_id     = Column(String,   default="")           # Celery task id, used to revoke on cancel
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
