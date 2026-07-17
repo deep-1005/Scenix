@@ -7,6 +7,7 @@ Developed at CAVE labs, PES University under the guidance of mentors Professor D
 Scenix is an end-to-end platform that converts raw 360° captures of any scene — rooms, buildings, labs, heritage sites, facilities — into a navigable, measurable, photorealistic 3D Gaussian splat, with automatically detected, classified, and labelled objects and an auto-generated PDF summary report as future scope.
 
 Upload 360° panoramas of a scene; the system slices each one into pinhole perspective views, recovers camera poses and a sparse point cloud with COLMAP, statistically cleans the cloud, trains a Gaussian splat with FastGS, de-noises the splat, and serves the result through a web interface with per-stage progress tracking, resumable jobs, an interactive splat viewer, and an object-analytics table.
+PS: Some file names are mentioned as forensic because it was initially meant for crime scene reconstruction.
 
 <img width="1612" height="826" alt="image" src="https://github.com/user-attachments/assets/8c4551c6-8588-40ea-ade1-62b587a5996f" />
 
@@ -19,7 +20,6 @@ Upload 360° panoramas of a scene; the system slices each one into pinhole persp
 
 - [Key Features](#key-features)
 - [The 12-Stage Pipeline](#the-12-stage-pipeline)
-- [Current Status](#current-status)
 - [Architecture](#architecture)
 - [Repository Layout](#repository-layout)
 - [Tech Stack](#tech-stack)
@@ -70,26 +70,6 @@ Upload 360° panoramas of a scene; the system slices each one into pinhole persp
 Stages 2, 8, 9, and 11 constitute the core research contribution of the project.
 
 **Data flow principle:** the splat is for *viewing*; measurement relies on COLMAP poses and cleaned point clouds — plus scale calibration against a known reference before any distance is trusted.
-
-## Current Status
-
-| Stage | Status | Notes |
-|-------|--------|-------|
-| 1 — Capture & Ingestion | Complete | 360° upload, scene creation, broad format support (incl. HEIC) |
-| 2 — View Generation | Complete | 15 perspective views per panorama via `e2p`; 70 panoramas → 1050 views |
-| 3 — Preprocessing | Partially implemented | Blur filtering + video frame extraction workflows established |
-| 4 — COLMAP | Complete | Exhaustive matching; validated at 1050+ images; multi-model + undistortion handling |
-| 5 — Point-Cloud Cleaning | Complete | Auto-tuned RANSAC/DBSCAN/SOR with cleaned-cloud promotion |
-| 6 — FastGS | Complete | Tuned densification preset, mid-training saves, live progress parsing |
-| 7 — Splat Cleanup | Complete | 3dgsconverter opacity + SOR pass; SuperSplat manual path for inspection |
-| 8 — 3D Object Detection | In progress | OwlViT detection + triangulation + clustering integrated; prompt set and robustness under active work |
-| 9 — Classification | In progress | OpenCLIP crop classification wired; depends on detection crops |
-| 10 — Measurement | Partially implemented | Room + item dimensions computed; ArUco scale calibration implemented (marker must be visible in ≥2 views) |
-| 11 — Final Scene Viewer | Partially implemented | In-browser splat viewer working; clickable object overlay pending |
-| 12 — Report | Complete (v1) | PDF generated as final stage (room dimensions + object table) |
-| — SuGaR mesh | Removed | Trialled 15 July: conflicted with the FastGS build and produced weak meshes; meshing moved to the [Future Scope](#future-scope) |
-
-The pipeline has been validated end-to-end on our own indoor/outdoor captures and on external public datasets (Mendeley faculty-of-arts and parking-lot image sets) — see [Validation](#validation).
 
 ## Architecture
 
@@ -403,7 +383,7 @@ Scenix is functional end-to-end today, but several parts of the pipeline are del
 
 - **Hardened preprocessing** *(Stage 3)* — Blur and duplicate filtering exist but are only partially tuned. Future work includes making the blur/duplicate thresholds configurable per capture device and surfacing rejected-frame reasons directly in the UI (the backend already logs them).
 
-## Research Framing
+## Research Direction
 
 Gaussian splatting alone is not novel. The contribution of this project is the **automatic 3D object layer built on top of it**:
 
@@ -411,7 +391,6 @@ Gaussian splatting alone is not novel. The contribution of this project is the *
 
 The system sits at the intersection of photogrammetry (COLMAP), neural scene representation (3DGS), computer vision (detection/segmentation), 3D object localisation (multi-view triangulation), and XR (the walkable end product). Because the reconstruction can be made metric and every processing step is logged, the same pipeline extends naturally to domains that demand defensible accuracy — facility documentation, insurance assessment, heritage preservation, and scene documentation among them.
 
-PS: Names are mentioned as forensic because it was initially meant for crime scene reconstruction.
 
 ## Acknowledgements
 
