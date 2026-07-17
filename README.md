@@ -1,6 +1,7 @@
 # Scenix
 
-**AI-Assisted 3D Scene Reconstruction using Gaussian Splatting and 3D Object Detection**
+**3D Scene Reconstruction using Gaussian Splatting with Insta360 360° camera**
+Developed at CAVE labs, PES University under the guidance of mentors Professor Dr Adithya Balasubramanyam and Manoj Kumar HR. 
 
 Scenix is an end-to-end platform that converts raw 360° captures of any scene — rooms, buildings, labs, heritage sites, facilities — into a navigable, measurable, photorealistic 3D Gaussian splat, with automatically detected, classified, and labelled objects and an auto-generated PDF summary report.
 
@@ -271,18 +272,23 @@ Open **http://localhost:5173**. The header shows `API connected` when the fronte
 
 3. **Inspect results** in the tabs:
    - **Cubemaps** — the generated perspective views (15 per panorama), downloadable
+     
       <img width="1498" height="777" alt="image" src="https://github.com/user-attachments/assets/361e46e1-0616-4b65-bf0e-4e1d1d90db01" />
 
    - **Point cloud** — sparse reconstruction with camera-position markers, `.ply` download
+     
       <img width="1526" height="788" alt="image" src="https://github.com/user-attachments/assets/3e0f4d3f-16bf-47e2-8189-1d373674c277" />
 
    - **Gaussian splat** — splat-centers preview, trained `.ply` download (open in SuperSplat for full-quality inspection)
+     
       <img width="1612" height="835" alt="image" src="https://github.com/user-attachments/assets/6218683c-98d1-4583-a24d-f2ec40c1801f" />
 
    - **Splat viewer** — full photorealistic reconstruction, explorable in the browser
+     
       <img width="1608" height="837" alt="image" src="https://github.com/user-attachments/assets/2f0c3096-98ef-4390-904f-0b48022789ee" />
 
-   - **Evidence** — detected/classified items with confidence and dimensions, plus room dimensions(Future Scope)
+   - **Evidence** — detected/classified items with confidence and dimensions, plus room dimensions (Future Scope)
+
      
 4. **Manage scenes** — every scene keeps its progress; failed or stopped jobs can be **resumed** from the last completed stage; scenes can be searched, stopped, and deleted from the sidebar, and disk usage is visible in the storage summary.
 
@@ -291,9 +297,12 @@ Open **http://localhost:5173**. The header shows `API connected` when the fronte
 ### Capture Protocol (Stage 1)
 
 **The camera must physically move between shots.** Rotation-only capture gives zero depth and reconstruction *will* fail regardless of downstream settings. Capture 360° panoramas from many standing positions across the scene with generous overlap; ~70 positions reconstructed a full classroom well. Avoid motion blur — motion-blurred frames significantly degrade COLMAP feature matching. For metric measurements, place a printed ArUco marker (4×4_50 dictionary, known size — default 10 cm) where at least two capture positions can see it.
+
 Some images taken by Insta360 degree camera: 
+
 <img width="1730" height="817" alt="image" src="https://github.com/user-attachments/assets/d024baa9-0f8d-4d05-907e-d961c9abb676" />
 <img width="1565" height="766" alt="image" src="https://github.com/user-attachments/assets/e2a2566a-e803-4c96-9f17-842314713461" />
+
 These are images of a classroom in PES University, BE block.
 
 ## Training Configuration
@@ -372,8 +381,7 @@ COLMAP is run with **exhaustive matching** — mandatory for unordered generated
 - **Indoor:** a full classroom from 70 panoramas → 1050 generated views; dense, well-registered COLMAP model and a clear photorealistic splat (visibly superior to a 444-view run of the same room).
 - **Outdoor:** the south-eastern campus building reconstructed and explorable in the in-browser splat viewer.
   
-<img width="1637" height="857" alt="image" src="https://github.com/user-attachments/assets/393f5c3f-61dc-4c80-8303-76be1803561d" />
-<img width="1647" height="861" alt="image" src="https://github.com/user-attachments/assets/63d142c9-fc0e-428e-989a-7cf0f59cdf76" />
+<img width="1637" height="857" alt="image" src="https://github.com/user-attachments/assets/393f5c3f-61dc-4c80-8303-76be1803561d" />  <img width="1647" height="861" alt="image" src="https://github.com/user-attachments/assets/63d142c9-fc0e-428e-989a-7cf0f59cdf76" />
 
 
 ## Future Scope
