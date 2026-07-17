@@ -45,7 +45,7 @@ Upload 360° panoramas of a scene; the system slices each one into pinhole persp
 - **Splat cleanup** — floaters and low-opacity noise removed from the trained splat with `3dgsconverter` (opacity threshold + statistical outlier removal).
 - **Object analytics(future scope)** — open-vocabulary 2D detection (OwlViT) with prompts, multi-view triangulation of detections into 3D scene coordinates using recovered COLMAP poses, DBSCAN clustering into distinct objects, and OpenCLIP classification of per-item crops — surfaced as a tabulated Evidence view with dimensions and room dimensions.
 - **Marker-based scale calibration** — an ArUco marker (4×4_50, default 10 cm) visible in ≥2 views is triangulated from real camera poses to convert COLMAP units to metres; without a marker, measurements fall back to relative units.
-- **Automated PDF report** — Jinja2 + WeasyPrint render the room dimensions and object table to `report.pdf` as the final pipeline stage.
+- **Automated PDF report(future scope)** — Jinja2 + WeasyPrint render the room dimensions and object table to `report.pdf` as the final pipeline stage.
 - **Interactive web viewers** — generated-view gallery, sparse point cloud with camera-position markers, Gaussian splat preview, and a full in-browser splat viewer (`@mkkellogg/gaussian-splats-3d` + Three.js), with `.ply` downloads at every step.
 - **Scene management** — multiple scenes with progress bars, search, per-stage stop, resume, delete, and a storage-usage summary.
 - **Desktop wrapper** — an Electron shell (`desktop/`) for running the UI as a native app.
@@ -61,11 +61,11 @@ Upload 360° panoramas of a scene; the system slices each one into pinhole persp
 | 5 | **Point-Cloud Cleaning** | RANSAC + DBSCAN + SOR on the sparse cloud, auto-tuned; cleaned cloud promoted for training | Open3D, NumPy |
 | 6 | **Gaussian Splatting** | Photorealistic 3D model trained from `sparse/0` | FastGS, PyTorch, CUDA |
 | 7 | **Splat Cleanup** | Floating noise / low-opacity splats auto-removed | 3dgsconverter |
-| 8 | **3D Object Detection** | Objects detected in 2D with text prompts, triangulated to 3D via COLMAP poses, clustered | OwlViT, DBSCAN, custom triangulation |
-| 9 | **Classification & Tagging** | Detected items classified from crops, assigned IDs and confidence scores | OpenCLIP (ViT-B-32) |
+| 8 | **3D Object Detection(future scope)** | Objects detected in 2D with text prompts, triangulated to 3D via COLMAP poses, clustered | OwlViT, DBSCAN, custom triangulation |
+| 9 | **Classification & Tagging(future scope)** | Detected items classified from crops, assigned IDs and confidence scores | OpenCLIP (ViT-B-32) |
 | 10 | **Measurement** | Room dimensions + per-item dimensions; metric scale from an ArUco marker when present | OpenCV ArUco, Open3D, NumPy |
 | 11 | **Final Scene Viewer** | Walkable scene; labelled object overlay in progress | Three.js + gaussian-splats-3d |
-| 12 | **Automated Report** | PDF summary: room dimensions, object table with classifications and dimensions | Jinja2, WeasyPrint |
+| 12 | **Automated Report(future scope)** | PDF summary: room dimensions, object table with classifications and dimensions | Jinja2, WeasyPrint |
 
 Stages 2, 8, 9, and 11 constitute the core research contribution of the project.
 
