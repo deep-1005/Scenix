@@ -2,22 +2,34 @@
 
 **AI-Assisted 3D Scene Reconstruction using Gaussian Splatting and 3D Object Detection**
 
+*A Summer 2026 research internship project — CAVE Labs, PESU*
+
 Scenix is an end-to-end platform that converts raw 360° captures of any scene — rooms, buildings, labs, heritage sites, facilities — into a navigable, measurable, photorealistic 3D Gaussian splat, with automatically detected, classified, and labelled objects and an auto-generated PDF summary report.
 
 Upload 360° panoramas of a scene; the system slices each one into pinhole perspective views, recovers camera poses and a sparse point cloud with COLMAP, statistically cleans the cloud, trains a Gaussian splat with FastGS, de-noises the splat, and serves the result through a web interface with per-stage progress tracking, resumable jobs, an interactive splat viewer, and an object-analytics table.
 
 > **The core research contribution:** The proposed framework presents an end-to-end automated pipeline for 3D scene reconstruction from 360° panoramic images. Unlike conventional Gaussian Splatting workflows that require manual preprocessing and prepared datasets, the proposed system integrates automatic perspective-view generation, COLMAP-based Structure-from-Motion, adaptive point cloud cleaning using DBSCAN and RANSAC, FastGS-based Gaussian Splat training, and an interactive web-based visualization platform into a single unified framework. The pipeline further incorporates quality-enhancement techniques, including cleaned point cloud promotion and tuned densification, along with resumable execution and real-time progress monitoring, making it a scalable and deployment-ready solution for efficient 3D scene reconstruction.
 
+<p align="center">
+  <img src="./assets/ui-scene-dashboard.png" width="80%" alt="Scenix scene management dashboard" />
+  <br/>
+  <em>The Scenix web dashboard — scenes, per-stage progress, and storage usage at a glance</em>
+</p>
+
 ---
 
 ## Table of Contents
 
+- [Why Scenix](#why-scenix)
 - [Key Features](#key-features)
+- [Gallery](#gallery)
 - [The 12-Stage Pipeline](#the-12-stage-pipeline)
 - [Current Status](#current-status)
 - [Architecture](#architecture)
 - [Repository Layout](#repository-layout)
 - [Tech Stack](#tech-stack)
+- [Development Journey](#development-journey)
+- [Tools We Evaluated (and Why We Moved On)](#tools-we-evaluated-and-why-we-moved-on)
 - [Installation](#installation)
 - [Running the Platform](#running-the-platform)
 - [Usage](#usage)
@@ -27,8 +39,15 @@ Upload 360° panoramas of a scene; the system slices each one into pinhole persp
 - [Validation](#validation)
 - [Roadmap](#roadmap)
 - [Research Framing](#research-framing)
+- [Acknowledgements](#acknowledgements)
 
 ---
+
+## Why Scenix
+
+3D Gaussian Splatting produces stunning photorealistic scene renders, but on its own it's just a pretty picture: a raw splat has no object semantics, no metric scale, and no automated way to go from "here's a scene" to "here's a labelled inventory of what's in it, with dimensions." Every existing open-source workflow we found (Brush, Postshot, RealityScan, Nerfstudio, etc.) assumes a human is manually curating input images, running each stage by hand, and inspecting the output in a separate desktop tool.
+
+Scenix's premise is that this entire chain — from a folder of 360° photos to a walkable, measurable, object-tagged 3D scene and a PDF report — can be automated, monitored, and made resumable, and that a genuinely useful "digital twin" pipeline needs an **object layer on top of the splat**, not just the splat itself. That object layer (open-vocabulary detection → multi-view 3D triangulation → clustering → classification → measurement) is the part of this project that doesn't already exist elsewhere, and it's what turns a pretty render into a usable record of a physical space — useful for facility documentation, insurance assessment, heritage preservation, and forensic-style scene capture.
 
 ## Key Features
 
@@ -44,6 +63,41 @@ Upload 360° panoramas of a scene; the system slices each one into pinhole persp
 - **Interactive web viewers** — generated-view gallery, sparse point cloud with camera-position markers, Gaussian splat preview, and a full in-browser splat viewer (`@mkkellogg/gaussian-splats-3d` + Three.js), with `.ply` downloads at every step.
 - **Scene management** — multiple scenes with progress bars, search, per-stage stop, resume, delete, and a storage-usage summary.
 - **Desktop wrapper** — an Electron shell (`desktop/`) for running the UI as a native app.
+
+## Gallery
+
+<table>
+<tr>
+<td width="50%">
+<img src="./assets/ui-pipeline-progress.png" width="100%" alt="Pipeline progress tracking UI" />
+<p align="center"><em>Per-stage progress with live log tail</em></p>
+</td>
+<td width="50%">
+<img src="./assets/ui-viewer-2.png" width="100%" alt="In-browser splat viewer" />
+<p align="center"><em>In-browser Gaussian splat viewer</em></p>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="./assets/colmap-sparse-room.png" width="100%" alt="COLMAP sparse reconstruction of a room" />
+<p align="center"><em>COLMAP sparse point cloud with recovered camera poses, from 1050 generated perspective views</em></p>
+</td>
+<td width="50%">
+<img src="./assets/gaussian-splat-supersplat.png" width="100%" alt="Trained Gaussian splat inspected in SuperSplat" />
+<p align="center"><em>Trained Gaussian splat, inspected in SuperSplat</em></p>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="./assets/meshlab-pointcloud.png" width="100%" alt="Point cloud viewed in MeshLab" />
+<p align="center"><em>Cleaned point cloud, cross-checked in MeshLab</em></p>
+</td>
+<td width="50%">
+<img src="./assets/object-detection.png" width="100%" alt="Early object detection experiments" />
+<p align="center"><em>Early object-detection / classification experiments feeding the Evidence view</em></p>
+</td>
+</tr>
+</table>
 
 ## The 12-Stage Pipeline
 
@@ -172,6 +226,41 @@ Scenix/
 | Reporting | Jinja2 + WeasyPrint (PDF) |
 | Production target | Docker → Kubernetes + NVIDIA container runtime |
 
+## Development Journey
+
+Scenix was built over roughly four weeks as a Summer 2026 internship project, and the architecture reflects a lot of dead ends that shaped which decisions were deliberate rather than defaults. The short version: **most existing 3D reconstruction tools assume clean, pre-processed, non-panoramic input** — getting from "a folder of 360° photos" to "something COLMAP and a Gaussian splatter will accept" was the first real problem, and automating that conversion is the reason Stage 2 (view generation) exists at all.
+
+**Week 1 — Foundations.** Started from photogrammetry and 3D Gaussian Splatting theory, then hands-on with COLMAP using the official sample dataset, cross-checked in MeshLab and Brush + SuperSplat. Early photo tests (a bottle shot on a phone, a book shot on the 360 camera) were used to compare COLMAP against RealityScan — RealityScan reconstructed faster and exported directly to `.obj`/Unity, while COLMAP's own exports needed more massaging, but COLMAP's pose/point-cloud outputs turned out to be the more useful foundation for later stages (dense metadata, full control over parameters).
+
+**Week 2 — The panorama problem.** Feeding raw equirectangular 360° images straight into COLMAP or RealityScan simply didn't work — no pinhole camera model, no usable feature matching. Pano2VR's free tier only converts 4 photos at a time, ruling it out for anything at scale. The fix was writing a Python conversion script to slice each panorama into cubemap/perspective faces before reconstruction — the direct predecessor of today's Stage 2. In parallel, half a dozen commercial/alternative pipelines were trialled — Hunyuan, LeChatFeld Studio, Polycam, Luma AI, PostShot, Metashape, Meshroom, Nerfstudio, LixelStudio — to see whether any of them solved panorama ingestion or Gaussian splatting out of the box (see the [comparison table](#tools-we-evaluated-and-why-we-moved-on) below for why none of them stuck).
+
+**Week 3 — Scaling up and automating.** Perspective-view generation moved from 6 cubemap faces to **15 views per panorama (5 yaw × 3 pitch, 90° FOV)** after testing showed it gave COLMAP meaningfully better inter-view overlap and registration. COLMAP was pushed from a few hundred images up to runs of 1000–5000+ generated views (hitting real infrastructure limits — a few systems ran out of storage entirely), while FastGS was integrated as the splat trainer of choice after Self-Organizing Gaussians (SOG) was evaluated and found not to be a drop-in replacement. A side-by-side FastGS run on the same room — 444 images vs. 1050 images — made the case for generating more perspective views per panorama rather than fewer: the 1050-view splat was visibly cleaner. This is also when the project moved from "run each stage by hand from the terminal" to "a real web application" — cubemap generation, COLMAP, and FastGS were wired into a single tracked pipeline with live progress percentages, and RANSAC + DBSCAN point-cloud cleaning (tuned with Optuna) was integrated.
+
+**Week 4 — Hosting, hardening, and the object layer.** With the core pipeline working end-to-end, effort shifted to (a) making it reachable outside a single machine — SSH tunnelling turned out to be the reliable option, after LAN/nginx hosting and Docker both stalled and ngrok's free-tier bandwidth cap kept killing splat streaming mid-demo — and (b) the object-detection layer that differentiates Scenix from "just another Gaussian splatting demo." A SuGaR mesh integration was attempted and dropped (it conflicted with the FastGS build and its mesh quality didn't justify the added complexity), and the roadmap now separates meshing from splatting entirely (see [Roadmap](#roadmap)). Object detection, classification, measurement, and report generation were built out and validated against both original captures and public Mendeley datasets to confirm the pipeline generalizes.
+
+## Tools We Evaluated (and Why We Moved On)
+
+Reconstructing a scene from 360° photos touches several distinct problems — SfM/photogrammetry, Gaussian splat training, and viewing/export — and a lot of the early project time went into figuring out which tool actually solves which problem well, rather than assuming one tool does everything.
+
+| Tool | Category | Verdict |
+|------|----------|---------|
+| **COLMAP** | Photogrammetry (SfM) | Adopted. Slower to set up than alternatives, but gives full parameter control, reliable camera poses, and a sparse point cloud that everything downstream (cleaning, training, measurement) depends on. |
+| **RealityScan** | Photogrammetry | Faster than COLMAP and exports directly to `.obj`/Unity, but weaker for inside-out (room-interior) captures and doesn't expose the pose/point-cloud data the rest of the pipeline needs. Used only for early comparison tests. |
+| **Pano2VR** | Equirect → cubemap conversion | Free tier caps at 4 images — unusable at any real scale. Replaced by a custom `e2p` Python conversion step (Stage 2). |
+| **Hugin** | Panorama stitching | Evaluated for the same conversion problem; not adopted into the pipeline. |
+| **Brush** | Gaussian splatting (browser-based) | Accepts 360° images fairly directly and gave promising early results, but wasn't practical to fully automate/generate at scale within the project's constraints. |
+| **FastGS** | Gaussian splatting | Adopted as the primary trainer — open, scriptable, and tunable (see [Training Configuration](#training-configuration)). |
+| **Self-Organizing Gaussians (SOG)** | Gaussian splatting | Evaluated as a possible alternative/replacement for FastGS; concluded it isn't a drop-in substitute for this pipeline's needs. |
+| **Hunyuan / LeChatFeld Studio** | Gaussian splatting (commercial) | Paid, closed pipelines; not adopted. |
+| **Polycam / Luma AI** | 3D capture apps | Produce 3D models from 2D photos, not true Gaussian splats — didn't fit the project's requirements. |
+| **PostShot** | Gaussian splatting | Worked well, but exports its own `.psht` format rather than standard `.ply`, breaking compatibility with the rest of the toolchain. |
+| **Metashape / Meshroom** | Photogrammetry | Evaluated as COLMAP alternatives; not adopted. |
+| **Nerfstudio** | NeRF / splatting framework | Tried across multiple environments (local PCs, Google Colab) and repeatedly hit storage/compute limits; not adopted. |
+| **LixelStudio / Splatforge** | End-to-end splatting UIs | Promising interfaces, but COLMAP integration issues in Splatforge and unresolved setup friction in LixelStudio kept both out of the final pipeline. |
+| **SuGaR** | Gaussian-to-mesh conversion | Trialled for a mesh export layer; conflicted with the FastGS build and produced weak meshes. Removed — meshing is now planned as a separate dual-output path (see [Roadmap](#roadmap)). |
+| **SuperSplat** | Splat inspection/cleanup (browser) | Kept as a manual inspection tool for `.ply` outputs alongside the automated Stage 7 cleanup — useful for visually verifying cleanup results. |
+| **MeshLab** | Point cloud/mesh inspection | Kept as a cross-check tool for point clouds outside the main web UI. |
+
 ## Installation
 
 The platform runs entirely user-space via conda — **no sudo required**. Developed on Ubuntu 24.04 with an NVIDIA GPU (CUDA required for FastGS training; COLMAP runs CPU-safe by default and GPU can be enabled via config).
@@ -257,8 +346,19 @@ Open **http://localhost:5173**. The header shows `API connected` when the fronte
 
 ### Remote / LAN access
 
-- **SSH tunnel** (recommended): `ssh -L 5173:localhost:5173 -L 8000:localhost:8000 user@<host>`
-- **ngrok** works but free-tier bandwidth is exhausted quickly by splat streaming; prefer LAN hosting or a duckdns.org subdomain for demos.
+<p align="center">
+  <img src="./assets/remote-access-ssh.png" width="70%" alt="Remote access over SSH" />
+  <br/>
+  <em>Running the pipeline on the lab's ISFCR machine and reaching it remotely over SSH</em>
+</p>
+
+Several hosting approaches were tried before settling on SSH tunnelling:
+
+- **SSH tunnel** (recommended, what we actually use): `ssh -L 5173:localhost:5173 -L 8000:localhost:8000 user@<host>`
+- **LAN + nginx** — attempted on the campus network but never got reliably working.
+- **Docker** — attempted for a portable deployment; hit persistent build errors and was shelved.
+- **ngrok** — works, but free-tier bandwidth is exhausted quickly by splat streaming (repeatedly crashed the splat viewer mid-demo); fine for a quick one-off share, not for a working session.
+- **duckdns.org** — recommended as a free subdomain option for LAN-hosted demos, as a lighter alternative to ngrok.
 
 ## Usage
 
