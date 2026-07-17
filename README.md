@@ -45,10 +45,10 @@ Upload 360° panoramas of a scene; the system slices them into pinhole-camera vi
 |---|-------|--------------|-----------|
 | 1 | **Capture & Ingestion** | 360° photos/video + metadata captured on site and uploaded | Insta360 X3/X4, FastAPI |
 | 2 | **Image Generation (Cubemaps)** | Each panorama sliced into flat perspective images COLMAP can use | py360convert (`e2c`/`e2p`), OpenCV |
-| 3 | **AI Preprocessing & QC** | Blurry / duplicate / low-quality frames removed (rejections logged) | OpenCV Laplacian, perceptual hash, SAM 2 |
+| 3 | **Preprocessing & QC** | Blurry / duplicate / low-quality frames removed (rejections logged) | OpenCV Laplacian, perceptual hash, SAM 2 |
 | 4 | **Photogrammetry** | Camera poses + sparse 3D point cloud recovered | COLMAP / pycolmap (+ SuperPoint/SuperGlue) |
 | 5 | **Gaussian Splatting** | Photorealistic 3D model trained from `sparse/0` | FastGS, PyTorch, CUDA |
-| 6 | **AI Splat Cleanup** | Floating noise / stray splat clusters auto-removed | DBSCAN / Open3D, SuperSplat |
+| 6 | **Splat Cleanup** | Floating noise / stray splat clusters auto-removed | DBSCAN / Open3D, SuperSplat |
 | 7 | **Mesh Conversion** | Splat → solid surface so the scene is *measurable* | SuGaR, Trimesh |
 | 8 | **3D Object Detection** | Objects detected in 2D, triangulated to 3D coordinates via COLMAP poses | Grounding DINO, SAM 2, custom triangulation |
 | 9 | **Classification & Tagging** | Detected items categorised and assigned IDs and confidence scores | Rule engine, PostgreSQL |
