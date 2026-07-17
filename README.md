@@ -1,8 +1,9 @@
 # Scenix
 
-**3D Scene Reconstruction using Gaussian Splatting with Insta360 360° camera**
-Developed at CAVE labs, PES University under the guidance of mentors Professor Dr Adithya Balasubramanyam and Manoj Kumar HR. 
+Developed at CAVE labs, PES University under the guidance of mentors Professor Dr Adithya Balasubramanyam and Manoj Kumar HR.
 
+
+**3D Scene Reconstruction using Gaussian Splatting with Insta360 360° camera**
 Scenix is an end-to-end platform that converts raw 360° captures of any scene — rooms, buildings, labs, heritage sites, facilities — into a navigable, measurable, photorealistic 3D Gaussian splat, with automatically detected, classified, and labelled objects and an auto-generated PDF summary report.
 
 Upload 360° panoramas of a scene; the system slices each one into pinhole perspective views, recovers camera poses and a sparse point cloud with COLMAP, statistically cleans the cloud, trains a Gaussian splat with FastGS, de-noises the splat, and serves the result through a web interface with per-stage progress tracking, resumable jobs, an interactive splat viewer, and an object-analytics table.
