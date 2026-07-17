@@ -2,11 +2,11 @@
 
 **AI-Assisted 3D Scene Reconstruction using Gaussian Splatting and 3D Object Detection**
 
-Scenix is an end-to-end platform that converts raw 360° captures of any scene — rooms, buildings, labs, heritage sites, facilities — into a navigable, measurable, photorealistic 3D gaussian splat, with automatically detected, classified, and labelled objects and an auto-generated summary report.
+Scenix is an end-to-end platform that converts raw 360° captures of any scene — rooms, buildings, labs, heritage sites, facilities — into a navigable, measurable, photorealistic 3D Gaussian splat, with automatically detected, classified, and labelled objects and an auto-generated PDF summary report.
 
-Upload 360° panoramas of a scene; the system slices them into pinhole-camera views, recovers camera poses and a sparse point cloud with COLMAP, trains a Gaussian splat with FastGS, cleans it, and serves the result through a web interface with per-stage progress tracking, an interactive splat viewer, and an object-analytics table.
+Upload 360° panoramas of a scene; the system slices each one into pinhole perspective views, recovers camera poses and a sparse point cloud with COLMAP, statistically cleans the cloud, trains a Gaussian splat with FastGS, de-noises the splat, and serves the result through a web interface with per-stage progress tracking, resumable jobs, an interactive splat viewer, and an object-analytics table.
 
-> **The core research contribution:** The proposed framework presents an end-to-end automated pipeline for 3D scene reconstruction from 360° panoramic images. Unlike conventional Gaussian Splatting workflows that require manual preprocessing and prepared datasets, the proposed system integrates automatic cubemap generation, COLMAP-based Structure-from-Motion, adaptive point cloud cleaning using DBSCAN and RANSAC, FastGS-based Gaussian Splat training, and an interactive web-based visualization platform into a single unified framework. The pipeline further incorporates quality-enhancement techniques, including cleaned point cloud promotion and optimized Gaussian regularization, along with resumable execution and real-time progress monitoring, making it a scalable and deployment-ready solution for efficient 3D scene reconstruction.
+> **The core research contribution:** The proposed framework presents an end-to-end automated pipeline for 3D scene reconstruction from 360° panoramic images. Unlike conventional Gaussian Splatting workflows that require manual preprocessing and prepared datasets, the proposed system integrates automatic perspective-view generation, COLMAP-based Structure-from-Motion, adaptive point cloud cleaning using DBSCAN and RANSAC, FastGS-based Gaussian Splat training, and an interactive web-based visualization platform into a single unified framework. The pipeline further incorporates quality-enhancement techniques, including cleaned point cloud promotion and tuned densification, along with resumable execution and real-time progress monitoring, making it a scalable and deployment-ready solution for efficient 3D scene reconstruction.
 
 ---
 
@@ -16,6 +16,7 @@ Upload 360° panoramas of a scene; the system slices them into pinhole-camera vi
 - [The 12-Stage Pipeline](#the-12-stage-pipeline)
 - [Current Status](#current-status)
 - [Architecture](#architecture)
+- [Repository Layout](#repository-layout)
 - [Tech Stack](#tech-stack)
 - [Installation](#installation)
 - [Running the Platform](#running-the-platform)
@@ -23,6 +24,7 @@ Upload 360° panoramas of a scene; the system slices them into pinhole-camera vi
 - [Training Configuration](#training-configuration)
 - [Implementation Notes](#implementation-notes)
 - [Troubleshooting](#troubleshooting)
+- [Validation](#validation)
 - [Roadmap](#roadmap)
 - [Research Framing](#research-framing)
 
@@ -30,109 +32,149 @@ Upload 360° panoramas of a scene; the system slices them into pinhole-camera vi
 
 ## Key Features
 
-- **One-click reconstruction** — upload 360° images and the full chain (cubemaps → COLMAP → FastGS → viewer) runs as a single tracked job with per-stage progress.
-- **360° panorama support** — automatic equirectangular → cubemap (`e2c`) and perspective (`e2p`) conversion; raw Insta360 exports are handled directly.
-- **Photorealistic Gaussian splatting** — FastGS training with quality-preserving defaults (full input resolution, tuned iteration count, floater/needle-artifact regularization).
-- **Interactive web viewers** — cubemap gallery, sparse point cloud with camera-position markers, Gaussian splat preview, and a full in-browser splat viewer (Three.js), with `.ply` downloads at every step.
-- **Point-cloud cleanup** — RANSAC + DBSCAN outlier removal with Optuna-tuned parameters.
-- **Object analytics** — object detection and classification over the scene, producing a tabulated view with per-item dimensions and computed room dimensions.
-- **Quality metrics** — PSNR / SSIM / LPIPS logged via TensorBoard for objective reconstruction-quality comparison across runs.
-- **Scene management** — multiple scenes with progress bars, search, and stop controls per stage.
+- **One-click reconstruction** — upload 360° images and the full chain (perspective views → COLMAP → cleaning → FastGS → cleanup → analytics → report) runs as a single tracked Celery job with per-stage progress and live log tail.
+- **Resumable jobs** — every stage has an on-disk completion check; a failed or stopped job can be resumed from the last completed stage instead of restarting from scratch.
+- **360° panorama support** — automatic equirectangular → perspective (`e2p`) conversion: 15 pinhole views per panorama (5 yaw × 3 pitch, 90° FOV, 1400×1400). Raw Insta360 exports are handled directly; JPG, PNG, WebP, BMP, TIFF and iPhone HEIC/HEIF are all accepted (via pillow-heif).
+- **Cleaned point cloud promotion** — RANSAC + DBSCAN + statistical outlier removal (Open3D, auto-tuned from average point spacing) runs on the sparse cloud *before* training, and the cleaned cloud is promoted into `sparse/0/points3D.ply` so FastGS provably trains on cleaned points.
+- **Photorealistic Gaussian splatting** — FastGS training with a tuned densification preset and mid-training checkpoints (see [Training Configuration](#training-configuration)).
+- **Splat cleanup** — floaters and low-opacity noise removed from the trained splat with `3dgsconverter` (opacity threshold + statistical outlier removal).
+- **Object analytics** — open-vocabulary 2D detection (OwlViT) with prompts, multi-view triangulation of detections into 3D scene coordinates using recovered COLMAP poses, DBSCAN clustering into distinct objects, and OpenCLIP classification of per-item crops — surfaced as a tabulated Evidence view with dimensions and room dimensions.
+- **Marker-based scale calibration** — an ArUco marker (4×4_50, default 10 cm) visible in ≥2 views is triangulated from real camera poses to convert COLMAP units to metres; without a marker, measurements fall back to relative units.
+- **Automated PDF report** — Jinja2 + WeasyPrint render the room dimensions and object table to `report.pdf` as the final pipeline stage.
+- **Interactive web viewers** — generated-view gallery, sparse point cloud with camera-position markers, Gaussian splat preview, and a full in-browser splat viewer (`@mkkellogg/gaussian-splats-3d` + Three.js), with `.ply` downloads at every step.
+- **Scene management** — multiple scenes with progress bars, search, per-stage stop, resume, delete, and a storage-usage summary.
+- **Desktop wrapper** — an Electron shell (`desktop/`) for running the UI as a native app.
 
 ## The 12-Stage Pipeline
 
 | # | Stage | What happens | Core tech |
 |---|-------|--------------|-----------|
 | 1 | **Capture & Ingestion** | 360° photos/video + metadata captured on site and uploaded | Insta360 X3/X4, FastAPI |
-| 2 | **Image Generation (Cubemaps)** | Each panorama sliced into flat perspective images COLMAP can use | py360convert (`e2c`/`e2p`), OpenCV |
-| 3 | **Preprocessing & QC** | Blurry / duplicate / low-quality frames removed (rejections logged) | OpenCV Laplacian, perceptual hash, SAM 2 |
-| 4 | **Photogrammetry** | Camera poses + sparse 3D point cloud recovered | COLMAP / pycolmap (+ SuperPoint/SuperGlue) |
-| 5 | **Gaussian Splatting** | Photorealistic 3D model trained from `sparse/0` | FastGS, PyTorch, CUDA |
-| 6 | **Splat Cleanup** | Floating noise / stray splat clusters auto-removed | DBSCAN / Open3D, SuperSplat |
-| 7 | **Mesh Conversion** | Splat → solid surface so the scene is *measurable* | SuGaR, Trimesh |
-| 8 | **3D Object Detection** | Objects detected in 2D, triangulated to 3D coordinates via COLMAP poses | Grounding DINO, SAM 2, custom triangulation |
-| 9 | **Classification & Tagging** | Detected items categorised and assigned IDs and confidence scores | Rule engine, PostgreSQL |
-| 10 | **Measurement** | Distances, areas, room dimensions computed automatically | Trimesh + NumPy on scaled mesh |
-| 11 | **Final Scene Viewer** | Walkable scene with clickable, labelled object boxes | Three.js (PlayCanvas/WebGPU target) |
-| 12 | **Automated Report** | Summary document: detected objects, measurements, capture metadata | python-docx / ReportLab, Jinja2 |
+| 2 | **View Generation** | Each panorama sliced into 15 pinhole perspective views (5 yaw × 3 pitch, 90° FOV, 1400×1400) | py360convert (`e2p`), OpenCV |
+| 3 | **Preprocessing & QC** | Blurry / duplicate / low-quality frames removed; video → frames (rejections logged) | OpenCV Laplacian, perceptual hash |
+| 4 | **Photogrammetry** | Camera poses + sparse 3D point cloud recovered; multi-model handling; undistortion | COLMAP 3.13 / pycolmap |
+| 5 | **Point-Cloud Cleaning** | RANSAC + DBSCAN + SOR on the sparse cloud, auto-tuned; cleaned cloud promoted for training | Open3D, NumPy |
+| 6 | **Gaussian Splatting** | Photorealistic 3D model trained from `sparse/0` | FastGS, PyTorch, CUDA |
+| 7 | **Splat Cleanup** | Floating noise / low-opacity splats auto-removed | 3dgsconverter |
+| 8 | **3D Object Detection** | Objects detected in 2D with text prompts, triangulated to 3D via COLMAP poses, clustered | OwlViT, DBSCAN, custom triangulation |
+| 9 | **Classification & Tagging** | Detected items classified from crops, assigned IDs and confidence scores | OpenCLIP (ViT-B-32) |
+| 10 | **Measurement** | Room dimensions + per-item dimensions; metric scale from an ArUco marker when present | OpenCV ArUco, Open3D, NumPy |
+| 11 | **Final Scene Viewer** | Walkable scene; labelled object overlay in progress | Three.js + gaussian-splats-3d |
+| 12 | **Automated Report** | PDF summary: room dimensions, object table with classifications and dimensions | Jinja2, WeasyPrint |
 
 Stages 2, 8, 9, and 11 constitute the core research contribution of the project.
 
-**Data flow principle:** the splat is for *viewing*; the mesh is for *measuring*. Reliable measurements need both — plus scale calibration against a known reference before any distance is trusted.
+**Data flow principle:** the splat is for *viewing*; measurement relies on COLMAP poses and cleaned point clouds — plus scale calibration against a known reference before any distance is trusted.
 
 ## Current Status
 
 | Stage | Status | Notes |
 |-------|--------|-------|
-| 1 — Capture & Ingestion | Complete | 360° upload, scene creation |
-| 2 — Cubemaps | Complete | 420 faces from 70 panoramas via py360convert |
+| 1 — Capture & Ingestion | Complete | 360° upload, scene creation, broad format support (incl. HEIC) |
+| 2 — View Generation | Complete | 15 perspective views per panorama via `e2p`; 70 panoramas → 1050 views |
 | 3 — Preprocessing | Partially implemented | Blur filtering + video frame extraction workflows established |
-| 4 — COLMAP | Complete | Exhaustive matching; validated at 1050+ images |
-| 5 — FastGS | Complete | Custom regularizers, QA metrics, tuned training preset |
-| 6 — Splat Cleanup | Partially implemented | RANSAC/DBSCAN + Optuna implemented; SuperSplat manual path |
-| 7 — SuGaR Mesh | Planned | Surface-aligned mesh for metric measurement |
-| 8 — 3D Object Detection | In progress | 2D detection integrated; triangulation is the active research task |
-| 9 — Classification | In progress | Detected items tabulated with labels, confidence, dimensions |
-| 10 — Measurement | Partially implemented | Room dimensions computed (COLMAP units); scale calibration pending |
-| 11 — Final Scene Viewer | Partially implemented | In-browser splat viewer working; object overlay pending |
-| 12 — Report | Planned | Automated DOCX/PDF generation |
+| 4 — COLMAP | Complete | Exhaustive matching; validated at 1050+ images; multi-model + undistortion handling |
+| 5 — Point-Cloud Cleaning | Complete | Auto-tuned RANSAC/DBSCAN/SOR with cleaned-cloud promotion |
+| 6 — FastGS | Complete | Tuned densification preset, mid-training saves, live progress parsing |
+| 7 — Splat Cleanup | Complete | 3dgsconverter opacity + SOR pass; SuperSplat manual path for inspection |
+| 8 — 3D Object Detection | In progress | OwlViT detection + triangulation + clustering integrated; prompt set and robustness under active work |
+| 9 — Classification | In progress | OpenCLIP crop classification wired; depends on detection crops |
+| 10 — Measurement | Partially implemented | Room + item dimensions computed; ArUco scale calibration implemented (marker must be visible in ≥2 views) |
+| 11 — Final Scene Viewer | Partially implemented | In-browser splat viewer working; clickable object overlay pending |
+| 12 — Report | Complete (v1) | PDF generated as final stage (room dimensions + object table) |
+| — SuGaR mesh | Removed | Trialled 15 July: conflicted with the FastGS build and produced weak meshes; meshing moved to the dual-output roadmap |
+
+The pipeline has been validated end-to-end on our own indoor/outdoor captures and on external public datasets (Mendeley faculty-of-arts and parking-lot image sets) — see [Validation](#validation).
 
 ## Architecture
 
 ```
                         ┌─────────────────────────────┐
-                        │   React + Vite + TypeScript │
-                        │   Three.js viewers (5173)   │
+                        │   React + Vite + Three.js   │
+                        │   splat viewers (5173)      │
                         └──────────────┬──────────────┘
-                                       │ REST
+                                       │ REST (axios)
                         ┌──────────────▼──────────────┐
                         │      FastAPI  (8000)        │
                         │      backend/app/main.py    │
                         └──────┬───────────────┬──────┘
                                │               │
                      job queue │               │ scene metadata
-                        ┌──────▼──────┐  ┌─────▼────────┐
-                        │    Redis    │  │  PostgreSQL  │
-                        └──────┬──────┘  └──────────────┘
-                               │
-                        ┌──────▼──────────────────────┐
-                        │  Celery workers (tasks.py)  │
-                        │  cubemaps → COLMAP → FastGS │
-                        │  → cleanup → detect → …     │
-                        └─────────────────────────────┘
+                        ┌──────▼──────┐  ┌─────▼─────────────┐
+                        │    Redis    │  │ SQLite (default)  │
+                        └──────┬──────┘  │ or PostgreSQL     │
+                               │         └───────────────────┘
+                        ┌──────▼──────────────────────────────┐
+                        │  Celery worker (workers/tasks.py)   │
+                        │  views → COLMAP → cleaning → FastGS │
+                        │  → cleanup → detect → classify      │
+                        │  → measure → report                 │
+                        └─────────────────────────────────────┘
 ```
 
-Long-running reconstruction jobs (COLMAP and FastGS runs take minutes to hours) execute asynchronously in Celery workers so the API and UI stay responsive; every stage reports progress back to the scene record.
+Long-running reconstruction jobs (COLMAP and FastGS runs take minutes to hours) execute asynchronously in a Celery worker so the API and UI stay responsive; every stage reports status, progress, and a log tail back to the job record, and each stage's completion is verifiable on disk (which is what makes `resume` safe).
+
+Scene metadata lives in SQLAlchemy models; the database defaults to **SQLite** (`sqlite:///./forensic.db`) and switches to PostgreSQL by setting `DATABASE_URL` in `backend/.env` — no code changes needed.
 
 **Standard scene folder layout** (enforced — downstream tools depend on it):
 
 ```
-my_scene/
-├── images/          # perspective frames from Stage 2
-├── sparse/0/        # cameras.bin, images.bin, points3D.bin
-└── database.db      # kept OUT of images/ — delete to reset COLMAP
+storage/outputs/<job_id>/
+├── images/                  # perspective views from Stage 2 (undistorted after COLMAP)
+├── sparse/0/                # cameras.bin, images.bin, points3D.bin, points3D.ply (cleaned)
+├── gaussian_output/         # FastGS model; point_cloud/iteration_*/point_cloud.ply (+ _clean.ply)
+├── evidence.json            # detected objects (3D positions, supporting views)
+├── evidence_classified.json # + classification labels and confidences
+├── measurements.json        # room + per-item dimensions
+├── report.pdf               # final generated report
+└── database.db              # COLMAP database — kept OUT of images/; delete to reset COLMAP
 ```
 
-Only `sparse/0/` matters downstream; the COLMAP `dense/` output is not used by FastGS.
+Only `sparse/0/` matters for training; the COLMAP `dense/` output is used solely as the source of undistorted images.
+
+## Repository Layout
+
+```
+Scenix/
+├── backend/
+│   ├── app/
+│   │   ├── main.py            # FastAPI app + all REST endpoints
+│   │   ├── core/config.py     # settings (.env): DATABASE_URL, REDIS_URL, storage paths, COLMAP GPU
+│   │   ├── models/db.py       # SQLAlchemy Job model
+│   │   ├── workers/tasks.py   # Celery pipeline: stage order, resume checks, FastGS preset
+│   │   └── pipeline/          # cubemaps.py (e2p views), colmap_sfm.py, clean_pointcloud.py,
+│   │                          # fastgs.py, cleanup.py, detection.py, classify.py,
+│   │                          # measure.py, report.py, colmap_geometry.py
+│   ├── fix_fastgs_flags.py    # strips regularizer flags unsupported by the FastGS build
+│   └── requirements.txt
+├── frontend/                  # React + Vite; components incl. GaussianSplatViewer,
+│                              # PointCloudViewer, EvidenceViewer, StorageManager
+├── desktop/                   # Electron wrapper (npm start)
+├── run.sh                     # launcher: bash run.sh {api|worker|frontend}
+└── services.sh                # user-space Postgres + Redis: bash services.sh {start|stop|status}
+```
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
 | Capture | Insta360 360° camera, Insta360 Studio |
-| Conversion | py360convert (`e2c`, `e2p`), OpenCV, NumPy |
-| Photogrammetry | COLMAP 3.13 (conda-forge, CUDA build), pycolmap, SuperPoint/SuperGlue |
-| Splatting | FastGS (primary), SuGaR (mesh target), 3DGS (under evaluation) |
-| AI / CV | Grounding DINO (open-vocabulary detection), SAM 2 (segmentation) |
-| Backend | Python, FastAPI, Celery, Redis, PostgreSQL |
-| Frontend | React, Vite, TypeScript, Three.js |
+| Conversion | py360convert (`e2p`), OpenCV, Pillow (+ pillow-heif for HEIC), NumPy |
+| Photogrammetry | COLMAP 3.13 (conda-forge, CUDA build), pycolmap |
+| Splatting | FastGS (primary); 3dgsconverter (splat cleanup) |
+| AI / CV | OwlViT (open-vocabulary detection, via transformers), OpenCLIP ViT-B-32 (classification), scikit-learn DBSCAN; Grounding DINO / Ultralytics available in the environment for the detection upgrade path |
+| Cleaning | Open3D (RANSAC / DBSCAN / SOR), auto-tuned parameters |
+| Measurement | OpenCV ArUco (scale marker), Open3D, NumPy |
+| Backend | Python, FastAPI, Celery, Redis, SQLAlchemy (SQLite default / PostgreSQL optional) |
+| Frontend | React 18, Vite, Three.js, @mkkellogg/gaussian-splats-3d, axios |
+| Desktop | Electron |
 | Inspection | SuperSplat (browser splat cleanup), MeshLab |
-| Reporting | python-docx / Node `docx` |
+| Reporting | Jinja2 + WeasyPrint (PDF) |
 | Production target | Docker → Kubernetes + NVIDIA container runtime |
 
 ## Installation
 
-The platform runs entirely user-space via conda — **no sudo required**. Developed on Ubuntu 24.04 with an NVIDIA GPU (CUDA required for COLMAP GPU features and FastGS training).
+The platform runs entirely user-space via conda — **no sudo required**. Developed on Ubuntu 24.04 with an NVIDIA GPU (CUDA required for FastGS training; COLMAP runs CPU-safe by default and GPU can be enabled via config).
 
 ### 1. Clone
 
@@ -144,16 +186,15 @@ cd Scenix
 ### 2. Create the conda environment
 
 ```bash
-conda create -n forensic python=3.10 -y
+conda create -n forensic python=3.11 -y
 conda activate forensic
 
-# COLMAP (CUDA build) + core services from conda-forge
-conda install -c conda-forge colmap pycolmap postgresql redis-server -y
+# COLMAP (CUDA build) from conda-forge; add postgresql redis-server if not using SQLite
+conda install -c conda-forge colmap pycolmap redis-server -y
 
-# Python dependencies
+# Python dependencies (FastAPI, Celery, py360convert, Open3D, pycolmap,
+# 3dgsconverter, transformers/OwlViT deps, open_clip_torch, WeasyPrint, …)
 pip install -r backend/requirements.txt
-# (fastapi, uvicorn, celery, redis, psycopg2, py360convert, opencv-python,
-#  numpy, open3d, optuna, torch — see requirements.txt for pinned versions)
 ```
 
 ### 3. FastGS
@@ -165,50 +206,52 @@ pip install -e .          # builds diff_gaussian_rasterization_fastgs (needs CUD
 cd ..
 ```
 
-If training later fails with `ModuleNotFoundError: No module named 'diff_gaussian_rasterization_fastgs'`, the rasterizer extension didn't build — re-run the install inside the env with CUDA visible.
+If training later fails with `ModuleNotFoundError: No module named 'diff_gaussian_rasterization_fastgs'`, the rasterizer extension didn't build — re-run the install inside the env with CUDA visible. This exact failure also surfaces *inside the platform* as `Failed: FastGS exited with code 1` on the Gaussian stage.
 
-### 4. Initialise services
+Then point the pipeline at your paths: `FASTGS_DIR`, `CONDA_PYTHON`, and the `FASTGS_ENV` CUDA paths at the top of `backend/app/workers/tasks.py` (or set the `FASTGS_DIR` environment variable).
+
+### 4. Database and Redis
+
+SQLite is the default — nothing to set up. Start Redis (required for Celery):
 
 ```bash
-# PostgreSQL (user-space data directory)
-initdb -D ~/pgdata
-pg_ctl -D ~/pgdata -l ~/pgdata/logfile start
-createdb scenix
-
-# Redis
 redis-server --daemonize yes
 ```
 
-### 5. Frontend
+To use PostgreSQL instead, set `DATABASE_URL` in `backend/.env` and either run your own server or use the bundled user-space helper:
 
 ```bash
-cd frontend
-npm install
+bash services.sh start     # user-space Postgres + Redis (data under .localdb/)
+bash services.sh status
+```
+
+### 5. Frontend (and optional desktop shell)
+
+```bash
+cd frontend && npm install
+# optional native wrapper:
+cd ../desktop && npm install
 ```
 
 ## Running the Platform
 
-Verify services first:
+Open **three terminals**, each with `conda activate forensic` — or use the launcher:
 
 ```bash
-psql -c "SELECT 1"     # PostgreSQL up
-redis-cli ping         # → PONG
+bash run.sh api        # Terminal 1 — FastAPI on :8000 (run from backend/)
+bash run.sh worker     # Terminal 2 — Celery worker (runs the pipeline)
+bash run.sh frontend   # Terminal 3 — Vite dev server on :5173
 ```
 
-Then open **three terminals**, each with `conda activate forensic`:
+Equivalent manual commands:
 
 ```bash
-# Terminal 1 — API server
 cd backend && uvicorn app.main:app --reload --port 8000
-
-# Terminal 2 — Celery worker (runs the pipeline)
 cd backend && celery -A app.workers.tasks worker --loglevel=info
-
-# Terminal 3 — Frontend dev server
 cd frontend && npm run dev
 ```
 
-Open **http://localhost:5173**. The header shows `API connected` when the frontend can reach the backend.
+Open **http://localhost:5173**. The header shows `API connected` when the frontend can reach the backend. The Electron app is launched with `npm start` from `desktop/`.
 
 > **Note:** Run uvicorn from `backend/`, not the repo root — `ModuleNotFoundError: No module named 'app'` always means it was launched from the wrong directory.
 
@@ -219,79 +262,105 @@ Open **http://localhost:5173**. The header shows `API connected` when the fronte
 
 ## Usage
 
-1. **Create a scene** — enter a name and drop the 360° equirectangular `.jpg` exports (Insta360 Studio: use the *360 photos* export, not reframed DNG).
-2. **Start reconstruction** — the stage tracker runs Cubemaps → COLMAP → Cleaning → Gaussian → Cleanup → Mesh → Detection → Classify → Measure → Report.
+1. **Create a scene** — enter a name and drop the 360° equirectangular exports (Insta360 Studio: use the *360 photos* export, not reframed DNG). JPG/PNG/WebP/BMP/TIFF/HEIC accepted; up to 100 panoramas per scene (larger sets are evenly subsampled).
+2. **Start reconstruction** — the stage tracker runs Views → COLMAP → Cleaning → Gaussian → Cleanup → Detection → Classify → Measure → Report, with live progress and log tail per stage.
 3. **Inspect results** in the tabs:
-   - **Cubemaps** — generated faces (6 per panorama), downloadable
-   - **Point cloud** — sparse reconstruction with orange camera-position markers, `.ply` download
+   - **Cubemaps** — the generated perspective views (15 per panorama), downloadable
+   - **Point cloud** — sparse reconstruction with camera-position markers, `.ply` download
    - **Gaussian splat** — splat-centers preview, trained `.ply` download (open in SuperSplat for full-quality inspection)
    - **Splat viewer** — full photorealistic reconstruction, explorable in the browser
-   - **Objects** — detected/classified items with confidence and dimensions, plus room dimensions
-4. Every scene keeps its progress; jobs can be stopped per stage and scenes can be searched from the sidebar.
+   - **Evidence** — detected/classified items with confidence and dimensions, plus room dimensions
+4. **Manage scenes** — every scene keeps its progress; failed or stopped jobs can be **resumed** from the last completed stage; scenes can be searched, stopped, and deleted from the sidebar, and disk usage is visible in the storage summary.
 
 ### Capture Protocol (Stage 1)
 
-**The camera must physically move between shots.** Rotation-only capture gives zero depth and reconstruction *will* fail regardless of downstream settings. Capture 360° panoramas from many standing positions across the scene with generous overlap; ~70 positions reconstructed a full classroom well. Avoid motion blur — motion-blurred frames significantly degrade COLMAP feature matching.
+**The camera must physically move between shots.** Rotation-only capture gives zero depth and reconstruction *will* fail regardless of downstream settings. Capture 360° panoramas from many standing positions across the scene with generous overlap; ~70 positions reconstructed a full classroom well. Avoid motion blur — motion-blurred frames significantly degrade COLMAP feature matching. For metric measurements, place a printed ArUco marker (4×4_50 dictionary, known size — default 10 cm) where at least two capture positions can see it.
 
 ## Training Configuration
 
-The training preset (`train_forensic.sh`) wraps FastGS with defaults chosen for maximum-fidelity output:
+The live preset (`_build_fastgs_cmd` in `backend/app/workers/tasks.py`) wraps FastGS with tuned defaults:
 
 ```bash
-python train.py -s <scene_path> \
+python train.py -s <scene_path> --model_path <out> \
     --iterations 30000 \
-    -r 1 \
-    --opacity_entropy_weight <w1> \      # suppresses floater artifacts
-    --scale_anisotropy_weight <w2>       # suppresses needle/spike splats
+    --save_iterations 15000 30000 \
+    --checkpoint_iterations 30000 \
+    -r 2 \
+    --densification_interval 100 \
+    --densify_until_iter 15000 \
+    --grad_abs_thresh 0.0006 \
+    --grad_thresh 0.00015 \
+    --loss_thresh 0.06 \
+    --highfeature_lr 0.02 \
+    --lambda_dssim 0.3 \
+    --test_iterations 7000 15000 30000
 ```
 
 | Setting | Value | Why |
 |---------|-------|-----|
-| `-r 1` | **always** | FastGS silently downscales inputs wider than 1600 px, throwing away detail. Full input resolution is enforced end-to-end. |
-| `--iterations` | ~30 000 | Beyond ~30k FastGS overfits the training views rather than improving reconstruction. |
-| Opacity entropy loss | custom | Drives ambiguous low-opacity Gaussians to transparent → fewer floaters. |
-| Scale anisotropy loss | custom | Penalises extreme axis ratios → fewer needle/spike splats. |
-| QA metrics | PSNR / SSIM / LPIPS | Logged to TensorBoard for objective quality comparison across runs. |
+| `--iterations` | 30 000 | Beyond ~30k FastGS overfits the training views rather than improving reconstruction. |
+| Densification | interval 100, until iter 15 000, lowered gradient thresholds | Denser splat growth early in training for finer geometry, frozen for the second half. |
+| `--lambda_dssim` | 0.3 | Heavier structural-similarity weighting for sharper reconstruction. |
+| `-r` | 2 (preset) / 1 (max fidelity) | Input resolution divisor. Views are generated at 1400×1400 in Stage 2, so `-r 2` trains at 700 px for speed; switch to `-r 1` for maximum-fidelity runs. **Never rely on FastGS's default:** it silently downscales anything wider than 1600 px. |
+| Mid-training saves | 15 000 + 30 000 | A usable splat exists halfway through, and checkpoints allow post-hoc comparison. |
+| QA metrics | PSNR / SSIM / LPIPS at test iterations | Objective quality comparison across runs. |
 
-COLMAP is run with **exhaustive matching** — mandatory for unordered cubemap faces (see below).
+> **Note on regularizer flags:** earlier presets passed custom opacity/scale regularization flags (`--lambda_opacity_reg`, `--lambda_scale_reg`, …). The current FastGS build does not accept them and training fails on unknown flags — `backend/fix_fastgs_flags.py` exists to strip them from `tasks.py` if they reappear. Floater/needle suppression is instead handled by the cleaned-cloud promotion (Stage 5) and the post-training cleanup pass (Stage 7: `3dgsconverter --min_opacity 5 --sor_intensity 8`).
+
+COLMAP is run with **exhaustive matching** — mandatory for unordered generated views (see below).
 
 ## Implementation Notes
 
-1. **Equirectangular images fed directly to COLMAP fail.** Conversion to pinhole views (Stage 2) is mandatory — this is the whole reason the cubemap stage exists.
-2. **Exhaustive matching is mandatory for cubemap faces.** Consecutive filenames are not spatially adjacent, so sequential matching finds far too few correspondences.
-3. **Always pass `-r 1`.** FastGS downscales anything >1600 px wide *silently*, which quietly destroys the detail you captured.
-4. **More iterations do not improve quality.** Approximately 30,000 iterations is optimal; beyond that the model overfits the training views.
-5. **Physical camera translation is required.** Rotation-only panorama capture cannot reconstruct geometry.
-6. **COLMAP 3.13 renamed option groups:** `SiftExtraction`/`SiftMatching` → `FeatureExtraction`/`FeatureMatching`. Old scripts break quietly.
-7. **pycolmap camera centers vary by version.** Use a fallback chain: `project_center()` → `projection_center()` → manual `-R.T @ t`.
-8. **Raw 3DGS geometry is noisy and non-metric.** Triangulate object positions from COLMAP poses and points, not from splats; measure on the SuGaR mesh, view on the splat.
-9. **`database.db` lives outside `images/`.** It fills progressively during a run; deleting it is the clean reset.
-10. **SuperSplat + local `.ply`:** browsers block local file loads (CORS) — serve the folder with `python -m http.server 8000`.
-11. **Rejected frames are logged, never silently deleted** — every processing decision stays traceable.
+1. **Equirectangular images fed directly to COLMAP fail.** Conversion to pinhole views (Stage 2) is mandatory — this is the whole reason the view-generation stage exists. GUI converters were dead ends (Pano2VR free tier caps at 4 photos); scripted `e2p` is the solution.
+2. **15 perspective views beat 6 cubemap faces.** 5 yaw × 3 pitch at 90° FOV gives much better inter-view overlap for COLMAP than plain `e2c` cube faces — this switch materially improved registration.
+3. **Exhaustive matching is mandatory for generated views.** Consecutive filenames are not spatially adjacent, so sequential matching finds far too few correspondences.
+4. **Synthetic views get locked PINHOLE intrinsics.** Stage-2 crops have exactly known focal/centre, so COLMAP runs with fixed shared PINHOLE intrinsics (`all_synthetic=True`); real photos fall back to per-image SIMPLE_RADIAL estimation, and `image_undistorter` then produces genuinely undistorted images for FastGS (a no-op for the PINHOLE path).
+5. **The mapper can produce multiple partial models.** The pipeline scores all `sparse/*` models, keeps the one with the most registered images, and moves it to `sparse/0` so downstream stages always read one canonical model.
+6. **Cleaned-cloud promotion is load-bearing.** FastGS reads `sparse/0/points3D.ply` directly if it exists — the cleaning stage must overwrite that exact file, or FastGS silently trains on raw uncleaned points.
+7. **More iterations do not improve quality.** ~30,000 iterations is optimal; beyond that the model overfits the training views.
+8. **Watch FastGS's silent downscaling.** Anything wider than 1600 px is downscaled unless `-r` is set explicitly; resolution is therefore controlled deliberately (1400 px generation + explicit `-r`).
+9. **Physical camera translation is required.** Rotation-only panorama capture cannot reconstruct geometry.
+10. **COLMAP 3.13 renamed option groups:** `SiftExtraction`/`SiftMatching` → `FeatureExtraction`/`FeatureMatching`. Old scripts break quietly.
+11. **pycolmap APIs vary by version.** Camera pose access (`cam_from_world` attribute vs callable) and post-processing helpers are resolved through fallback chains rather than assumed.
+12. **`cv2.setNumThreads(0)` before Celery forks.** OpenCV's internal thread pool + Celery's prefork `os.fork()` produce intermittent broken-pipe errors; disabling cv2 threading is the standard fix.
+13. **Raw 3DGS geometry is noisy and non-metric.** Object positions are triangulated from COLMAP poses and multi-view detections, never from splats; metric scale comes from the ArUco marker.
+14. **Celery workers don't inherit CUDA visibility by default.** `tasks.py` injects `CUDA_HOME`/`PATH`/`LD_LIBRARY_PATH` for the FastGS subprocess; COLMAP runs CPU-mode by default (`colmap_use_gpu: false`) as the safe fallback. Kubernetes + NVIDIA container runtime is the production fix.
+15. **`database.db` lives outside `images/`.** It fills progressively during a run; deleting it is the clean reset.
+16. **SuperSplat + local `.ply`:** browsers block local file loads (CORS) — serve the folder with `python -m http.server 8000`.
+17. **Rejected frames are logged, never silently deleted** — unreadable files and subsampled panoramas are tracked, so every processing decision stays traceable.
 
 ## Troubleshooting
 
 | Symptom | Cause / Fix |
 |---------|-------------|
 | `ModuleNotFoundError: No module named 'app'` | uvicorn launched from repo root — run it from `backend/` |
-| `ModuleNotFoundError: diff_gaussian_rasterization_fastgs` | FastGS rasterizer not built — reinstall FastGS inside the env with CUDA toolkit available |
-| COLMAP registers very few images | Sequential matching used on cubemap faces — switch to exhaustive matching |
-| Sparse cloud thin on plain walls | Textureless surfaces + blur — improve capture overlap, tighten Stage 3 blur threshold |
-| Splat full of floaters / spikes | Use the training preset (regularizers) + Stage 6 DBSCAN cleanup |
-| Splat looks soft / detail lost | `-r 1` missing — inputs were silently downscaled |
-| Celery worker trains on CPU | CUDA not visible inside worker processes (known issue) — Kubernetes + NVIDIA container runtime is the production fix |
+| `Failed: FastGS exited with code 1 … ModuleNotFoundError: diff_gaussian_rasterization_fastgs` | FastGS rasterizer not built — reinstall FastGS inside the env with the CUDA toolkit available |
+| FastGS fails on an unrecognised flag | The build doesn't support the custom regularizer flags — run `python backend/fix_fastgs_flags.py` |
+| COLMAP registers very few images | Sequential matching used on generated views — the pipeline uses exhaustive matching; check custom scripts |
+| Fewer images registered than uploaded | Normal — near-duplicate / low-parallax frames add nothing and are dropped during registration; large uploads are also evenly subsampled to the panorama cap |
+| Mapper produced several `sparse/*` folders | Handled automatically — the largest model is promoted to `sparse/0` |
+| Sparse cloud thin on plain walls | Textureless surfaces + blur — improve capture overlap, tighten the Stage 3 blur threshold |
+| Splat full of floaters / spikes | Ensure the cleaning stage promoted `points3D.ply`, and rely on the Stage 7 `3dgsconverter` pass |
+| Splat looks soft / detail lost | `-r 2` preset trades resolution for speed — rerun with `-r 1` for maximum fidelity |
+| Celery worker trains on CPU | CUDA not visible inside worker processes — check the `FASTGS_ENV` paths in `tasks.py`; Kubernetes + NVIDIA runtime is the production fix |
+| Measurements are in arbitrary units | No ArUco marker was visible in ≥2 views — reshoot with the marker placed, or treat dimensions as relative |
 | Splat viewer crashes over ngrok | Free-tier bandwidth exhausted — use LAN/SSH or a duckdns subdomain |
+| Report stage fails | WeasyPrint needs its native libs (pango/cairo) — install them in the environment |
+
+## Validation
+
+- **Indoor:** a full classroom from 70 panoramas → 1050 generated views; dense, well-registered COLMAP model and a clear photorealistic splat (visibly superior to a 444-view run of the same room).
+- **Outdoor:** the south-eastern campus building reconstructed and explorable in the in-browser splat viewer.
+- **External datasets:** public Mendeley image sets (a faculty-of-arts building and a parking lot) reconstructed well end-to-end through the platform with no dataset-specific tuning — confirming the pipeline generalises beyond our own captures.
 
 ## Roadmap
 
-- **SuGaR integration (Stages 6–7):** surface-aligned mesh from the cleaned splat for metrically accurate geometry
-- **Dual-output architecture:** 3DGS for visualization + 2DGS or MVS mesh as the measurement substrate
-- **2D→3D object triangulation (Stage 8):** multi-view matching + ray intersection using COLMAP poses — the core research contribution
-- **Object records:** per-item ID, category, 3D position, supporting-view count, confidence
-- **Scale calibration:** anchor to a known in-scene reference (scale marker / LiDAR) before any measurement is trusted
-- **Final Scene viewer (Stage 11):** clickable labelled object boxes, layer toggles (PlayCanvas / WebGPU)
-- **Automated report (Stage 12):** DOCX/PDF export with object list, measurements, capture metadata, and full processing log
-- **GPU workers at scale:** Docker → Kubernetes with NVIDIA container runtime
+- **Mesh layer via dual-output architecture:** 3DGS for visualization + 2DGS or MVS mesh as the measurement substrate. (A direct SuGaR integration was trialled and removed — it conflicted with the FastGS build and its meshes didn't justify the complexity.)
+- **Detection hardening (Stage 8):** configurable prompt sets, stronger open-vocabulary models (Grounding DINO / SAM 2 upgrade path), per-object records with supporting-view counts — the core research contribution.
+- **Final Scene viewer (Stage 11):** clickable labelled object boxes and layer toggles over the splat (PlayCanvas / WebGPU target).
+- **Report v2 (Stage 12):** richer PDF/DOCX export with capture metadata, renders, and the full processing log.
+- **Scale calibration extensions:** LiDAR / multi-marker references beyond the single ArUco marker.
+- **GPU workers at scale:** Docker → Kubernetes with NVIDIA container runtime to give Celery workers reliable CUDA visibility.
 
 ## Research Framing
 
@@ -299,8 +368,8 @@ Gaussian splatting alone is not novel. The contribution of this project is the *
 
 > *Automatic 3D Object Detection and Classification in Gaussian-Splatted Scenes* — detecting objects in 2D imagery, triangulating them into 3D scene coordinates using recovered camera poses, classifying them into categories, and surfacing them as an interactive, measurable layer inside a walkable 3D rendering.
 
-The system sits at the intersection of photogrammetry (COLMAP), neural scene representation (3DGS), computer vision (detection/segmentation), 3D object localisation (multi-view triangulation), and XR (the walkable end product). Because the reconstruction is metric and every processing step is logged, the same pipeline extends naturally to domains that demand defensible accuracy — facility documentation, insurance assessment, heritage preservation, and scene documentation among them.
+The system sits at the intersection of photogrammetry (COLMAP), neural scene representation (3DGS), computer vision (detection/segmentation), 3D object localisation (multi-view triangulation), and XR (the walkable end product). Because the reconstruction can be made metric and every processing step is logged, the same pipeline extends naturally to domains that demand defensible accuracy — facility documentation, insurance assessment, heritage preservation, and scene documentation among them.
 
 ## Acknowledgements
 
-Developed as a Summer 2026 internship project at CAVE Labs, PESU. Built on the open-source work of [COLMAP](https://colmap.github.io/), [FastGS](https://github.com/fastgs/FastGS), [py360convert](https://github.com/sunset1995/py360convert), [SuperSplat](https://playcanvas.com/supersplat/editor), [SuGaR](https://anttwo.github.io/sugar/) and [SAM].
+Developed as a Summer 2026 internship project at CAVE Labs, PESU. Built on the open-source work of [COLMAP](https://colmap.github.io/), [FastGS](https://github.com/fastgs/FastGS), [py360convert](https://github.com/sunset1995/py360convert), [SuperSplat](https://playcanvas.com/supersplat/editor), [3dgsconverter](https://github.com/francescofugazzi/3dgsconverter), [OwlViT](https://huggingface.co/docs/transformers/model_doc/owlvit), and [OpenCLIP](https://github.com/mlfoundations/open_clip).
