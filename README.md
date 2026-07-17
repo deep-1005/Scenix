@@ -1,4 +1,4 @@
-<img width="1643" height="862" alt="image" src="https://github.com/user-attachments/assets/dbaca01f-1297-4abb-91b4-08b6e3625773" /># Scenix
+# Scenix
 
 **AI-Assisted 3D Scene Reconstruction using Gaussian Splatting and 3D Object Detection**
 
