@@ -32,7 +32,7 @@ PS: Some file names are mentioned as forensic because it was initially meant for
 - [Troubleshooting](#troubleshooting)
 - [Validation](#validation)
 - [Future Scope](#future-scope)
-- [Research Framing](#research-framing)
+- [Research Direction](#research-direction)
 
 ---
 
