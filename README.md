@@ -1,4 +1,4 @@
-# Scenix
+<img width="1643" height="862" alt="image" src="https://github.com/user-attachments/assets/dbaca01f-1297-4abb-91b4-08b6e3625773" /># Scenix
 
 **AI-Assisted 3D Scene Reconstruction using Gaussian Splatting and 3D Object Detection**
 
@@ -371,7 +371,9 @@ COLMAP is run with **exhaustive matching** — mandatory for unordered generated
 
 - **Indoor:** a full classroom from 70 panoramas → 1050 generated views; dense, well-registered COLMAP model and a clear photorealistic splat (visibly superior to a 444-view run of the same room).
 - **Outdoor:** the south-eastern campus building reconstructed and explorable in the in-browser splat viewer.
-
+  
+<img width="1637" height="857" alt="image" src="https://github.com/user-attachments/assets/393f5c3f-61dc-4c80-8303-76be1803561d" />
+<img width="1647" height="861" alt="image" src="https://github.com/user-attachments/assets/63d142c9-fc0e-428e-989a-7cf0f59cdf76" />
 
 
 ## Future Scope
