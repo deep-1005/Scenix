@@ -241,6 +241,11 @@ Open **http://localhost:5173**. The header shows `API connected` when the fronte
 
 > **Note:** Run uvicorn from `backend/`, not the repo root — `ModuleNotFoundError: No module named 'app'` always means it was launched from the wrong directory.
 
+
+<img width="1844" height="968" alt="image" src="https://github.com/user-attachments/assets/c45430d1-d4a5-4ac1-a5cd-71eeb2a4fb53" />
+
+
+
 ### Remote / LAN access
 
 - **SSH tunnel** (recommended): `ssh -L 5173:localhost:5173 -L 8000:localhost:8000 user@<host>`
