@@ -167,7 +167,7 @@ Scenix/
 | Conversion | py360convert (`e2p`), OpenCV, Pillow (+ pillow-heif for HEIC), NumPy |
 | Photogrammetry | COLMAP 3.13 (conda-forge, CUDA build), pycolmap |
 | Splatting | FastGS (primary); 3dgsconverter (splat cleanup) |
-| AI / CV | OwlViT (open-vocabulary detection, via transformers), OpenCLIP ViT-B-32 (classification), scikit-learn DBSCAN; Grounding DINO / Ultralytics available in the environment for the detection upgrade path |
+| Object Detection | OwlViT (open-vocabulary detection, via transformers), OpenCLIP ViT-B-32 (classification), scikit-learn DBSCAN; Grounding DINO / Ultralytics available in the environment for the detection upgrade path |
 | Cleaning | Open3D (RANSAC / DBSCAN / SOR), auto-tuned parameters |
 | Measurement | OpenCV ArUco (scale marker), Open3D, NumPy |
 | Backend | Python, FastAPI, Celery, Redis, SQLAlchemy (SQLite default / PostgreSQL optional) |
