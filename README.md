@@ -411,6 +411,8 @@ Gaussian splatting alone is not novel. The contribution of this project is the *
 
 The system sits at the intersection of photogrammetry (COLMAP), neural scene representation (3DGS), computer vision (detection/segmentation), 3D object localisation (multi-view triangulation), and XR (the walkable end product). Because the reconstruction can be made metric and every processing step is logged, the same pipeline extends naturally to domains that demand defensible accuracy — facility documentation, insurance assessment, heritage preservation, and scene documentation among them.
 
+PS: Names are mentioned as forensic because it was initially meant for crime scene reconstruction.
+
 ## Acknowledgements
 
 Developed as a Summer 2026 internship project at CAVE Labs, PESU. Built on the open-source work of [COLMAP](https://colmap.github.io/), [FastGS](https://github.com/fastgs/FastGS), [py360convert](https://github.com/sunset1995/py360convert), [SuperSplat](https://playcanvas.com/supersplat/editor), [3dgsconverter](https://github.com/francescofugazzi/3dgsconverter), [OwlViT](https://huggingface.co/docs/transformers/model_doc/owlvit), and [OpenCLIP](https://github.com/mlfoundations/open_clip).
