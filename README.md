@@ -7,6 +7,7 @@ Developed at CAVE labs, PES University under the guidance of mentors Professor D
 Scenix is an end-to-end platform that converts raw 360° captures of any scene — rooms, buildings, labs, heritage sites, facilities — into a navigable, measurable, photorealistic 3D Gaussian splat, with automatically detected, classified, and labelled objects and an auto-generated PDF summary report as future scope.
 
 Upload 360° panoramas of a scene; the system slices each one into pinhole perspective views, recovers camera poses and a sparse point cloud with COLMAP, statistically cleans the cloud, trains a Gaussian splat with FastGS, de-noises the splat, and serves the result through a web interface with per-stage progress tracking, resumable jobs, an interactive splat viewer, and an object-analytics table.
+
 PS: Some file names are mentioned as forensic because it was initially meant for crime scene reconstruction.
 
 <img width="1612" height="826" alt="image" src="https://github.com/user-attachments/assets/8c4551c6-8588-40ea-ade1-62b587a5996f" />
