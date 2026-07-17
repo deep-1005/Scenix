@@ -4,7 +4,7 @@ Developed at CAVE labs, PES University under the guidance of mentors Professor D
 
 
 **3D Scene Reconstruction using Gaussian Splatting with Insta360 360° camera**
-Scenix is an end-to-end platform that converts raw 360° captures of any scene — rooms, buildings, labs, heritage sites, facilities — into a navigable, measurable, photorealistic 3D Gaussian splat, with automatically detected, classified, and labelled objects and an auto-generated PDF summary report.
+Scenix is an end-to-end platform that converts raw 360° captures of any scene — rooms, buildings, labs, heritage sites, facilities — into a navigable, measurable, photorealistic 3D Gaussian splat, with automatically detected, classified, and labelled objects and an auto-generated PDF summary report as future scope.
 
 Upload 360° panoramas of a scene; the system slices each one into pinhole perspective views, recovers camera poses and a sparse point cloud with COLMAP, statistically cleans the cloud, trains a Gaussian splat with FastGS, de-noises the splat, and serves the result through a web interface with per-stage progress tracking, resumable jobs, an interactive splat viewer, and an object-analytics table.
 
@@ -43,7 +43,7 @@ Upload 360° panoramas of a scene; the system slices each one into pinhole persp
 - **Cleaned point cloud promotion** — RANSAC + DBSCAN + statistical outlier removal (Open3D, auto-tuned from average point spacing) runs on the sparse cloud *before* training, and the cleaned cloud is promoted into `sparse/0/points3D.ply` so FastGS provably trains on cleaned points.
 - **Photorealistic Gaussian splatting** — FastGS training with a tuned densification preset and mid-training checkpoints (see [Training Configuration](#training-configuration)).
 - **Splat cleanup** — floaters and low-opacity noise removed from the trained splat with `3dgsconverter` (opacity threshold + statistical outlier removal).
-- **Object analytics** — open-vocabulary 2D detection (OwlViT) with prompts, multi-view triangulation of detections into 3D scene coordinates using recovered COLMAP poses, DBSCAN clustering into distinct objects, and OpenCLIP classification of per-item crops — surfaced as a tabulated Evidence view with dimensions and room dimensions.
+- **Object analytics(future scope)** — open-vocabulary 2D detection (OwlViT) with prompts, multi-view triangulation of detections into 3D scene coordinates using recovered COLMAP poses, DBSCAN clustering into distinct objects, and OpenCLIP classification of per-item crops — surfaced as a tabulated Evidence view with dimensions and room dimensions.
 - **Marker-based scale calibration** — an ArUco marker (4×4_50, default 10 cm) visible in ≥2 views is triangulated from real camera poses to convert COLMAP units to metres; without a marker, measurements fall back to relative units.
 - **Automated PDF report** — Jinja2 + WeasyPrint render the room dimensions and object table to `report.pdf` as the final pipeline stage.
 - **Interactive web viewers** — generated-view gallery, sparse point cloud with camera-position markers, Gaussian splat preview, and a full in-browser splat viewer (`@mkkellogg/gaussian-splats-3d` + Three.js), with `.ply` downloads at every step.
